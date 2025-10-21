@@ -5,6 +5,8 @@
     reserved_desks TEXT NOT NULL,  -- e.g. "A1, A2, B3"
     remaining DECIMAL(10,2) NOT NULL,      -- how much is still owed
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    pending BOOLEAN DEFAULT 0,
+    comment TEXT;
 );
 
 2- reservations_8nov (
@@ -14,6 +16,9 @@
     reserved_desks TEXT NOT NULL,
     remaining DECIMAL(10,2) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    reservations_8nov
+    pending BOOLEAN DEFAULT 0,
+    comment TEXT;
 );
 3- accounts (
     email VARCHAR(100) NOT NULL UNIQUE,
