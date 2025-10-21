@@ -1,11 +1,9 @@
 <?php
-// Database configuration
+require_once 'auth_check.php';
 $host = 'localhost';
 $dbname = 'bi_angelos_2025';
 $username = 'root';
 $password = '';
-
-// Connect to database
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -13,8 +11,57 @@ try {
     die("Connection failed: " . $e->getMessage());
 }
 
-// Handle delete operation
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete') {
+try {
+    $tables = ['reservations_7nov', 'reservations_8nov'];
+    foreach ($tables as $table) {
+        $stmt = $pdo->prepare("DELETE FROM $table WHERE remaining > 0 AND created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)");
+        $stmt->execute();
+    }
+} catch(PDOException $e) {
+    error_log("Auto-cleanup failed: " . $e->getMessage());
+}
+
+if (isset($_GET['logout'])) {
+    session_destroy();
+    setcookie('user_email', '', time() - 3600, '/');
+    setcookie('user_token', '', time() - 3600, '/');
+    header("Location: login.php");
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'approve' && $userRole === 'Controller') {
+    $id = intval($_POST['id']);
+    $day = $_POST['day'];
+    $tableName = 'reservations_' . $day;
+    
+    try {
+        $stmt = $pdo->prepare("UPDATE $tableName SET pending = 0 WHERE id = ?");
+        $stmt->execute([$id]);
+        
+        header("Location: ?day=$day&tab=reservations&approved=1");
+        exit;
+    } catch(PDOException $e) {
+        $error = "Approve failed: " . $e->getMessage();
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'reject' && $userRole === 'Controller') {
+    $id = intval($_POST['id']);
+    $day = $_POST['day'];
+    $tableName = 'reservations_' . $day;
+    
+    try {
+        $stmt = $pdo->prepare("DELETE FROM $tableName WHERE id = ?");
+        $stmt->execute([$id]);
+        
+        header("Location: ?day=$day&tab=reservations&rejected=1");
+        exit;
+    } catch(PDOException $e) {
+        $error = "Reject failed: " . $e->getMessage();
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete' && $userRole === 'Controller') {
     $id = intval($_POST['id']);
     $day = $_POST['day'];
     $tableName = 'reservations_' . $day;
@@ -30,8 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// Handle update operation
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update' && $userRole === 'Controller') {
     $id = intval($_POST['id']);
     $day = $_POST['day'];
     $customerName = trim($_POST['customer_name']);
@@ -52,7 +98,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// Handle reservation submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'reserve') {
     $day = $_POST['day'];
     $customerName = trim($_POST['customer_name']);
@@ -60,12 +105,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $selectedSeats = $_POST['selected_seats'];
     $isPaid = isset($_POST['is_paid']) && $_POST['is_paid'] === '1';
     $remaining = $isPaid ? 0 : floatval($_POST['remaining']);
-    
+    $comment = isset($_POST['comment']) ? trim($_POST['comment']) : '';
+    $pending = ($userRole === 'Viewer') ? 1 : 0;
     $tableName = 'reservations_' . $day;
     
     try {
-        $stmt = $pdo->prepare("INSERT INTO $tableName (customer_name, phone_number, reserved_desks, remaining) VALUES (?, ?, ?, ?)");
-        $stmt->execute([$customerName, $phoneNumber, $selectedSeats, $remaining]);
+        $stmt = $pdo->prepare("INSERT INTO $tableName (customer_name, phone_number, reserved_desks, remaining, pending, comment) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$customerName, $phoneNumber, $selectedSeats, $remaining, $pending, $comment]);
         
         header("Location: ?day=$day&tab=map&success=1");
         exit;
@@ -74,30 +120,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-// Get selected day from URL parameter, default to 7nov
 $selectedDay = isset($_GET['day']) ? $_GET['day'] : '7nov';
 $tableName = 'reservations_' . $selectedDay;
-
-// Get selected tab from URL parameter, default to 'map'
 $selectedTab = isset($_GET['tab']) ? $_GET['tab'] : 'map';
-
-// Fetch all reservations for the selected day
 $stmt = $pdo->query("SELECT * FROM $tableName ORDER BY created_at DESC");
 $allReservations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$pendingReservations = array_filter($allReservations, function($res) {
+    return $res['pending'] == 1;
+});
+$approvedReservations = array_filter($allReservations, function($res) {
+    return $res['pending'] == 0;
+});
 
-// Parse reserved seats into an array with customer info
 $reservedSeats = [];
 $seatOwners = [];
+$pendingSeats = [];
 foreach ($allReservations as $reservation) {
     $seats = explode(',', $reservation['reserved_desks']);
     foreach ($seats as $seat) {
         $seatTrimmed = trim($seat);
-        $reservedSeats[] = $seatTrimmed;
-        $seatOwners[$seatTrimmed] = $reservation['customer_name'];
+        if ($reservation['pending'] == 1) {
+            $pendingSeats[] = $seatTrimmed;
+        } else {
+            $reservedSeats[] = $seatTrimmed;
+        }
+        $seatOwners[$seatTrimmed] = [
+            'name' => $reservation['customer_name'],
+            'pending' => $reservation['pending']
+        ];
     }
 }
 
-// Define seat configuration - REVERSED ORDER (P to A, back to front)
 $rightSide = [
     'PR' => 11, 'OR' => 11, 'NR' => 10, 'MR' => 9, 'LR' => 11, 'KR' => 11,
     'JR' => 11, 'IR' => 9, 'HR' => 11, 'GR' => 11, 'FR' => 11,
@@ -110,12 +163,14 @@ $leftSide = [
     'EL' => 10, 'DL' => 10, 'CL' => 11, 'BL' => 11, 'AL' => 11
 ];
 
-// Function to check if seat is reserved
 function isSeatReserved($seat, $reservedSeats) {
     return in_array($seat, $reservedSeats);
 }
 
-// Function to check if seat is sound control (PR1-3, OR1-3)
+function isSeatPending($seat, $pendingSeats) {
+    return in_array($seat, $pendingSeats);
+}
+
 function isSoundControl($row, $seatNum) {
     return (($row === 'PR' || $row === 'OR') && $seatNum >= 1 && $seatNum <= 3);
 }
@@ -148,6 +203,62 @@ function isSoundControl($row, $seatNum) {
             margin: 0 auto 15px;
             box-shadow: 0 4px 15px rgba(32, 127, 189, 0.2);
             max-width: 1400px;
+            position: relative;
+        }
+        
+        .user-info {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .user-badge {
+            background: linear-gradient(135deg, #207FBD 0%, #4a9ed1 100%);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .user-badge::before {
+            font-size: 14px;
+        }
+        
+        .role-badge {
+            background: linear-gradient(135deg, #FC723E 0%, #ff8c5a 100%);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .logout-btn {
+            background: linear-gradient(135deg, #f44336 0%, #e57373 100%);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .logout-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(244, 67, 54, 0.4);
         }
         
         .logo {
@@ -884,17 +995,19 @@ function isSoundControl($row, $seatNum) {
 
         /* Modal Styles */
         .modal {
-            display: none;
-            position: fixed;
-            z-index: 2000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(5px);
-            animation: fadeIn 0.3s ease;
-        }
+    display: none;
+    position: fixed;
+    z-index: 2000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(5px);
+    animation: fadeIn 0.3s ease;
+    overflow-y: auto; 
+    -webkit-overflow-scrolling: touch;
+}
 
         @keyframes fadeIn {
             from { opacity: 0; }
@@ -902,21 +1015,43 @@ function isSoundControl($row, $seatNum) {
         }
 
         .modal.active {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px 0; 
+}
 
-        .modal-content {
-            background: linear-gradient(135deg, #FFFEFF 0%, #f5f9fc 100%);
-            padding: 40px;
-            border-radius: 20px;
-            max-width: 600px;
-            width: 90%;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            animation: slideUp 0.4s ease;
-            position: relative;
-        }
+.modal-content {
+    background: linear-gradient(135deg, #FFFEFF 0%, #f5f9fc 100%);
+    padding: 40px;
+    border-radius: 20px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 90vh; 
+    overflow-y: auto; 
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    animation: slideUp 0.4s ease;
+    position: relative;
+    margin: auto; 
+}
+
+.modal-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.modal-content::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+.modal-content::-webkit-scrollbar-thumb {
+    background: #207FBD;
+    border-radius: 4px;
+}
+
+.modal-content::-webkit-scrollbar-thumb:hover {
+    background: #FC723E;
+}
 
         @keyframes slideUp {
             from { transform: translateY(50px); opacity: 0; }
@@ -1052,16 +1187,17 @@ function isSoundControl($row, $seatNum) {
             display: none;
             animation: slideDown 0.3s ease;
         }
+        
         .remaining-info {
-    color: #08a4a7;
-    font-weight: bold;
-    font-size: 18px;
-    margin-top: 15px;
-    padding: 10px;
-    background: linear-gradient(135deg, rgba(8, 164, 167, 0.1) 0%, rgba(8, 164, 167, 0.05) 100%);
-    border-radius: 8px;
-    border: 2px solid rgba(8, 164, 167, 0.3);
-}
+            color: #08a4a7;
+            font-weight: bold;
+            font-size: 18px;
+            margin-top: 15px;
+            padding: 10px;
+            background: linear-gradient(135deg, rgba(8, 164, 167, 0.1) 0%, rgba(8, 164, 167, 0.05) 100%);
+            border-radius: 8px;
+            border: 2px solid rgba(8, 164, 167, 0.3);
+        }
 
         @keyframes slideDown {
             from { opacity: 0; max-height: 0; }
@@ -1141,22 +1277,22 @@ function isSoundControl($row, $seatNum) {
             justify-content: center;
         }
 
-.seat-info-content {
-    background: white;
-    padding: 25px;
-    border-radius: 15px;
-    max-width: 350px;
-    width: 90%;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-    animation: popIn 0.3s ease;
-    text-align: center;
-    border: 3px solid #4CAF50;
-    transition: border-color 0.3s ease;
-}
+        .seat-info-content {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            max-width: 350px;
+            width: 90%;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            animation: popIn 0.3s ease;
+            text-align: center;
+            border: 3px solid #4CAF50;
+            transition: border-color 0.3s ease;
+        }
 
-.seat-info-content.unpaid {
-    border: 3px solid #08a4a7;
-}
+        .seat-info-content.unpaid {
+            border: 3px solid #08a4a7;
+        }
 
         @keyframes popIn {
             from { transform: scale(0.8); opacity: 0; }
@@ -1278,19 +1414,122 @@ function isSoundControl($row, $seatNum) {
                 max-width: 250px;
             }
         }
-.seat.reserved-unpaid {
-    background-color: #08a4a7;
+
+        .seat.reserved-unpaid {
+            background-color: #08a4a7;
+            color: white;
+            cursor: pointer;
+            border-color: #067779;
+        }
+
+        .seat.reserved-unpaid:hover {
+            background-color: #067779;
+            transform: scale(1.05);
+        }
+.seat.pending {
+    background-color: #5D5978;
     color: white;
     cursor: pointer;
-    border-color: #067779;
+    border-color: #4a4760;
 }
 
-.seat.reserved-unpaid:hover {
-    background-color: #067779;
+.seat.pending:hover {
+    background-color: #4a4760;
     transform: scale(1.05);
 }
-        /* Mobile responsiveness for table */
+
+.legend-box.pending {
+    background-color: #5D5978;
+}
+
+.pending-section {
+    margin-bottom: 40px;
+}
+
+.pending-section h2 {
+    color: #5D5978;
+    font-size: 24px;
+    margin-bottom: 20px;
+    padding: 15px;
+    background: linear-gradient(135deg, rgba(93, 89, 120, 0.1) 0%, rgba(93, 89, 120, 0.05) 100%);
+    border-radius: 10px;
+    border-left: 5px solid #5D5978;
+}
+
+.comment-cell {
+    max-width: 300px;
+    word-wrap: break-word;
+    padding: 10px;
+    background: #f9f9f9;
+    border-radius: 6px;
+    font-style: italic;
+    color: #555;
+}
+
+.btn-approve {
+    background: linear-gradient(135deg, #4CAF50 0%, #66bb6a 100%);
+    color: white;
+}
+
+.btn-approve:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
+}
+
+.btn-reject {
+    background: linear-gradient(135deg, #f44336 0%, #e57373 100%);
+    color: white;
+}
+
+.btn-reject:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(244, 67, 54, 0.4);
+}
+
+.viewer-restricted {
+    opacity: 0.5;
+    pointer-events: none;
+    user-select: none;
+}
+
+.viewer-message {
+    background: linear-gradient(135deg, #FF9800 0%, #FFB74D 100%);
+    color: white;
+    padding: 12px 20px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    text-align: center;
+    font-weight: 600;
+    box-shadow: 0 4px 15px rgba(255, 152, 0, 0.3);
+}
+
+.viewer-message::before {
+    content: 'ℹ️ ';
+    font-size: 18px;
+    margin-right: 8px;
+}
+
+.pending-badge {
+    display: inline-block;
+    background: linear-gradient(135deg, #5D5978 0%, #7a7691 100%);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-left: 8px;
+}
+
         @media (max-width: 767px) {
+            .user-info {
+                position: static;
+                justify-content: center;
+                margin-top: 10px;
+                flex-wrap: wrap;
+            }
+            
             .reservations-table {
                 font-size: 12px;
             }
@@ -1314,10 +1553,37 @@ function isSoundControl($row, $seatNum) {
                 font-size: 16px;
             }
 
-            .modal-content {
-                padding: 25px;
-                width: 95%;
-            }
+            .modal.active {
+        align-items: flex-start; 
+        padding: 10px 0;
+    }
+    
+    .modal-content {
+        padding: 25px 20px;
+        width: 95%;
+        max-height: calc(100vh - 20px); 
+        margin: 10px auto;
+    }
+
+    .close-modal {
+        right: 15px;
+        top: 15px;
+        width: 35px;
+        height: 35px;
+        font-size: 28px;
+    }
+
+    .modal-header h2 {
+        font-size: 22px;
+        padding-right: 40px; 
+    }
+
+    .form-group input[type="text"],
+    .form-group input[type="tel"],
+    .form-group input[type="number"],
+    .form-group textarea {
+        font-size: 16px; 
+    }
 
             .action-buttons {
                 flex-direction: column;
@@ -1330,12 +1596,23 @@ function isSoundControl($row, $seatNum) {
         <img src="logo.jpg" alt="Bi Angelos Theatre" class="logo">
         <h1>الساكن في ستر العلي، نظام الحجز</h1>
         <p class="subtitle">إختار الكرسي اللي تحب تتفرج من عليه</p>
+        <div class="user-info">
+            <div class="user-badge">
+                <?php echo htmlspecialchars($userEmail); ?>
+                <span class="role-badge"><?php echo htmlspecialchars($userRole); ?></span>
+            </div>
+            <a href="?logout=1" class="logout-btn" onclick="return confirm('Are you sure you want to logout?')">Logout</a>
+        </div>
     </div>
     
     <div class="container">
         <?php if (isset($_GET['success'])): ?>
             <div class="success-message">
-                Reservation completed successfully!
+                <?php if ($userRole === 'Viewer'): ?>
+                    Reservation submitted and pending approval!
+                <?php else: ?>
+                    Reservation completed successfully!
+                <?php endif; ?>
             </div>
         <?php endif; ?>
 
@@ -1351,6 +1628,18 @@ function isSoundControl($row, $seatNum) {
             </div>
         <?php endif; ?>
 
+        <?php if (isset($_GET['approved'])): ?>
+            <div class="success-message">
+                Reservation approved successfully!
+            </div>
+        <?php endif; ?>
+
+        <?php if (isset($_GET['rejected'])): ?>
+            <div class="success-message delete-message">
+                Reservation rejected and removed!
+            </div>
+        <?php endif; ?>
+
         <div class="day-selector">
             <a href="?day=7nov&tab=<?php echo $selectedTab; ?>" class="<?php echo $selectedDay === '7nov' ? 'active' : ''; ?>">November 7</a>
             <a href="?day=8nov&tab=<?php echo $selectedTab; ?>" class="<?php echo $selectedDay === '8nov' ? 'active' : ''; ?>">November 8</a>
@@ -1362,6 +1651,9 @@ function isSoundControl($row, $seatNum) {
             </a>
             <a href="?day=<?php echo $selectedDay; ?>&tab=reservations" class="tab-button <?php echo $selectedTab === 'reservations' ? 'active' : ''; ?>">
                 Reservations Data
+                <?php if (count($pendingReservations) > 0): ?>
+                    <span class="pending-badge"><?php echo count($pendingReservations); ?> Pending</span>
+                <?php endif; ?>
             </a>
         </div>
 
@@ -1378,9 +1670,13 @@ function isSoundControl($row, $seatNum) {
                         <span>Reserved</span>
                     </div>
                     <div class="legend-item">
-    <span class="legend-box reserved-unpaid" style="background-color: #08a4a7;"></span>
-    <span>Reserved (Unpaid)</span>
-</div>
+                        <span class="legend-box reserved-unpaid" style="background-color: #08a4a7;"></span>
+                        <span>Reserved (Unpaid)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-box pending"></span>
+                        <span>Pending Approval</span>
+                    </div>
                     <div class="legend-item">
                         <span class="legend-box sound-control"></span>
                         <span>Sound Control</span>
@@ -1411,12 +1707,11 @@ $startSeat = (($row === 'OR' || $row === 'PR') && $seatCount == 11) ? 4 : 1;
 for ($i = 1; $i <= 11; $i++): 
     $seatId = $row . $i;
     $isReserved = isSeatReserved($seatId, $reservedSeats);
+    $isPending = isSeatPending($seatId, $pendingSeats);
     $isSC = isSoundControl($row, $i);
-    
-    // Check if seat has remaining amount
     $hasRemaining = false;
     $ownerName = '';
-    if ($isReserved) {
+    if ($isReserved || $isPending) {
         foreach ($allReservations as $reservation) {
             $seats = explode(',', $reservation['reserved_desks']);
             foreach ($seats as $seat) {
@@ -1448,20 +1743,34 @@ for ($i = 1; $i <= 11; $i++):
         $class = 'blocked';
         $title = 'Blocked - Structure';
         $onclick = '';
+    } elseif ($isPending) {
+        $class = 'pending';
+        $title = 'Pending Approval - Reserved by ' . $ownerName;
+        $remaining = 0;
+        foreach ($allReservations as $reservation) {
+            $seats = explode(',', $reservation['reserved_desks']);
+            foreach ($seats as $seat) {
+                if (trim($seat) === $seatId) {
+                    $remaining = $reservation['remaining'];
+                    break 2;
+                }
+            }
+        }
+        $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining', true)";
     } elseif ($isReserved) {
         $class = $hasRemaining ? 'reserved-unpaid' : 'reserved';
         $title = 'Reserved by ' . $ownerName . ($hasRemaining ? ' (Unpaid)' : '');
         $remaining = 0;
-foreach ($allReservations as $reservation) {
-    $seats = explode(',', $reservation['reserved_desks']);
-    foreach ($seats as $seat) {
-        if (trim($seat) === $seatId) {
-            $remaining = $reservation['remaining'];
-            break 2;
+        foreach ($allReservations as $reservation) {
+            $seats = explode(',', $reservation['reserved_desks']);
+            foreach ($seats as $seat) {
+                if (trim($seat) === $seatId) {
+                    $remaining = $reservation['remaining'];
+                    break 2;
+                }
+            }
         }
-    }
-}
-$onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining')";
+        $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining', false)";
     } else {
         $class = 'available';
         $title = 'Available - Click to reserve';
@@ -1492,11 +1801,10 @@ $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining')";
                                     <?php for ($i = 1; $i <= 11; $i++): 
     $seatId = $row . $i;
     $isReserved = isSeatReserved($seatId, $reservedSeats);
-    
-    // Check if seat has remaining amount
+    $isPending = isSeatPending($seatId, $pendingSeats);
     $hasRemaining = false;
     $ownerName = '';
-    if ($isReserved) {
+    if ($isReserved || $isPending) {
         foreach ($allReservations as $reservation) {
             $seats = explode(',', $reservation['reserved_desks']);
             foreach ($seats as $seat) {
@@ -1515,33 +1823,47 @@ $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining')";
         $class = 'blocked';
         $title = 'Blocked - Structure';
         $onclick = '';
+    } elseif ($isPending) {
+        $class = 'pending';
+        $title = 'Pending Approval - Reserved by ' . $ownerName;
+        $remaining = 0;
+        foreach ($allReservations as $reservation) {
+            $seats = explode(',', $reservation['reserved_desks']);
+            foreach ($seats as $seat) {
+                if (trim($seat) === $seatId) {
+                    $remaining = $reservation['remaining'];
+                    break 2;
+                }
+            }
+        }
+        $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining', true)";
     } elseif ($isReserved) {
         $class = $hasRemaining ? 'reserved-unpaid' : 'reserved';
         $title = 'Reserved by ' . $ownerName . ($hasRemaining ? ' (Unpaid)' : '');
         $remaining = 0;
-foreach ($allReservations as $reservation) {
-    $seats = explode(',', $reservation['reserved_desks']);
-    foreach ($seats as $seat) {
-        if (trim($seat) === $seatId) {
-            $remaining = $reservation['remaining'];
-            break 2;
+        foreach ($allReservations as $reservation) {
+            $seats = explode(',', $reservation['reserved_desks']);
+            foreach ($seats as $seat) {
+                if (trim($seat) === $seatId) {
+                    $remaining = $reservation['remaining'];
+                    break 2;
+                }
+            }
         }
-    }
-}
-$onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining')";
+        $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining', false)";
     } else {
         $class = 'available';
         $title = 'Available - Click to reserve';
         $onclick = 'toggleSeat(this)';
     }
 ?>
-    <div class="seat <?php echo $class; ?>" 
-         data-seat="<?php echo $seatId; ?>" 
-         title="<?php echo $title; ?>"
-         onclick="<?php echo $onclick; ?>">
-        <?php echo $i; ?>
-    </div>
-<?php endfor; ?>
+                                        <div class="seat <?php echo $class; ?>" 
+                                             data-seat="<?php echo $seatId; ?>" 
+                                             title="<?php echo $title; ?>"
+                                             onclick="<?php echo $onclick; ?>">
+                                            <?php echo $i; ?>
+                                        </div>
+                                    <?php endfor; ?>
                                 </div>
                             </div>
                         <?php endforeach; ?>
@@ -1563,10 +1885,9 @@ $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining')";
         <!-- Reservations Data Tab -->
         <div class="tab-content <?php echo $selectedTab === 'reservations' ? 'active' : ''; ?>">
             <?php
-            // Calculate statistics
-            $totalReservations = count($allReservations);
+            $totalReservations = count($approvedReservations);
             $totalSeatsReserved = count($reservedSeats);
-            $totalRemaining = array_sum(array_column($allReservations, 'remaining'));
+            $totalRemaining = array_sum(array_column($approvedReservations, 'remaining'));
             ?>
 
             <div class="stats-container">
@@ -1584,6 +1905,81 @@ $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining')";
                 </div>
             </div>
 
+            <?php if ($userRole === 'Controller' && count($pendingReservations) > 0): ?>
+                <!-- Pending Reservations Section -->
+                <div class="pending-section">
+                    <h2>⏳ Pending Reservations Awaiting Approval</h2>
+                    <div class="reservations-container">
+                        <table class="reservations-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Customer Name</th>
+                                    <th>Phone Number</th>
+                                    <th>Reserved Seats</th>
+                                    <th>Remaining Amount</th>
+                                    <th>Comment</th>
+                                    <th>Created At</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($pendingReservations as $reservation): ?>
+                                    <tr>
+                                        <td><strong>#<?php echo htmlspecialchars($reservation['id']); ?></strong></td>
+                                        <td><?php echo htmlspecialchars($reservation['customer_name']); ?></td>
+                                        <td><?php echo htmlspecialchars($reservation['phone_number']); ?></td>
+                                        <td>
+                                            <div class="seats-cell">
+                                                <?php 
+                                                $seats = explode(',', $reservation['reserved_desks']);
+                                                foreach ($seats as $seat): 
+                                                ?>
+                                                    <span class="seat-badge"><?php echo trim(htmlspecialchars($seat)); ?></span>
+                                                <?php endforeach; ?>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="remaining-amount <?php echo $reservation['remaining'] == 0 ? 'remaining-paid' : ''; ?>">
+                                                <?php if ($reservation['remaining'] == 0): ?>
+                                                    Paid
+                                                <?php else: ?>
+                                                    EGP <?php echo number_format($reservation['remaining'], 2); ?>
+                                                <?php endif; ?>
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <div class="comment-cell">
+                                                <?php echo !empty($reservation['comment']) ? htmlspecialchars($reservation['comment']) : '<em>No comment</em>'; ?>
+                                            </div>
+                                        </td>
+                                        <td><?php echo date('M d, Y H:i', strtotime($reservation['created_at'])); ?></td>
+                                        <td>
+                                            <div class="action-buttons">
+                                                <form method="POST" action="" style="display: inline;">
+                                                    <input type="hidden" name="action" value="approve">
+                                                    <input type="hidden" name="day" value="<?php echo $selectedDay; ?>">
+                                                    <input type="hidden" name="id" value="<?php echo $reservation['id']; ?>">
+                                                    <button type="submit" class="btn-edit btn-approve" onclick="return confirm('Approve this reservation?')">Approve</button>
+                                                </form>
+                                                <form method="POST" action="" style="display: inline;">
+                                                    <input type="hidden" name="action" value="reject">
+                                                    <input type="hidden" name="day" value="<?php echo $selectedDay; ?>">
+                                                    <input type="hidden" name="id" value="<?php echo $reservation['id']; ?>">
+                                                    <button type="submit" class="btn-delete btn-reject" onclick="return confirm('Reject and delete this reservation?')">Reject</button>
+                                                </form>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- Approved Reservations Section -->
+
             <div class="reservations-container">
                 <?php if ($totalReservations > 0): ?>
                     <table class="reservations-table">
@@ -1595,11 +1991,13 @@ $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining')";
                                 <th>Reserved Seats</th>
                                 <th>Remaining Amount</th>
                                 <th>Created At</th>
-                                <th>Actions</th>
+                                <?php if ($userRole === 'Controller'): ?>
+                                    <th>Actions</th>
+                                <?php endif; ?>
                             </tr>
                         </thead>
                         <tbody>
-                            <?php foreach ($allReservations as $reservation): ?>
+                            <?php foreach ($approvedReservations as $reservation): ?>
                                 <tr>
                                     <td><strong>#<?php echo htmlspecialchars($reservation['id']); ?></strong></td>
                                     <td><?php echo htmlspecialchars($reservation['customer_name']); ?></td>
@@ -1624,12 +2022,14 @@ $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining')";
                                         </span>
                                     </td>
                                     <td><?php echo date('M d, Y H:i', strtotime($reservation['created_at'])); ?></td>
-                                    <td>
-                                        <div class="action-buttons">
-                                            <button class="btn-edit" onclick='openEditModal(<?php echo json_encode($reservation); ?>)'>Edit</button>
-                                            <button class="btn-delete" onclick="confirmDelete(<?php echo $reservation['id']; ?>)">Delete</button>
-                                        </div>
-                                    </td>
+                                    <?php if ($userRole === 'Controller'): ?>
+                                        <td>
+                                            <div class="action-buttons">
+                                                <button class="btn-edit" onclick='openEditModal(<?php echo json_encode($reservation); ?>)'>Edit</button>
+                                                <button class="btn-delete" onclick="confirmDelete(<?php echo $reservation['id']; ?>)">Delete</button>
+                                            </div>
+                                        </td>
+                                    <?php endif; ?>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -1643,16 +2043,17 @@ $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining')";
         </div>
     </div>
 
-<!-- Seat Info Modal (Small) -->
-<div id="seatInfoModal" class="seat-info-modal">
-    <div class="seat-info-content" id="seatInfoContent">
-        <h3>Seat: <span id="seatInfoSeatId"></span></h3>
-        <p>Reserved by:</p>
-        <p class="customer-name" id="seatInfoCustomerName"></p>
-        <p class="remaining-info" id="seatInfoRemaining" style="display: none;"></p>
-        <button class="close-seat-info" onclick="closeSeatInfo()">Close</button>
+    <!-- Seat Info Modal (Small) -->
+    <div id="seatInfoModal" class="seat-info-modal">
+        <div class="seat-info-content" id="seatInfoContent">
+            <h3>Seat: <span id="seatInfoSeatId"></span></h3>
+            <p id="seatInfoStatus"></p>
+            <p>Reserved by:</p>
+            <p class="customer-name" id="seatInfoCustomerName"></p>
+            <p class="remaining-info" id="seatInfoRemaining" style="display: none;"></p>
+            <button class="close-seat-info" onclick="closeSeatInfo()">Close</button>
+        </div>
     </div>
-</div>
 
     <!-- Reservation Modal -->
     <div id="reservationModal" class="modal">
@@ -1660,6 +2061,11 @@ $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining')";
             <span class="close-modal" onclick="closeReservationModal()">&times;</span>
             <div class="modal-header">
                 <h2>Complete Your Reservation</h2>
+                <?php if ($userRole === 'Viewer'): ?>
+                    <p style="color: #FF9800; font-size: 14px; margin-top: 10px;">
+                        Your reservation will be pending until approved by a Controller
+                    </p>
+                <?php endif; ?>
             </div>
             
             <form method="POST" action="" id="reservationForm">
@@ -1694,12 +2100,22 @@ $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining')";
 
                 <input type="hidden" name="is_paid" id="isPaidInput" value="1">
 
-                <button type="submit" class="submit-btn">Confirm Reservation</button>
+                <?php if ($userRole === 'Viewer'): ?>
+                    <div class="form-group">
+                        <label for="comment">Comment / Note *</label>
+                        <textarea id="comment" name="comment" required placeholder="Please add a comment about this reservation..."></textarea>
+                    </div>
+                <?php endif; ?>
+
+                <button type="submit" class="submit-btn">
+                    <?php echo $userRole === 'Viewer' ? 'Submit for Approval' : 'Confirm Reservation'; ?>
+                </button>
             </form>
         </div>
     </div>
 
-    <!-- Edit Modal -->
+    <!-- Edit Modal (Controller Only) -->
+    <?php if ($userRole === 'Controller'): ?>
     <div id="editModal" class="modal">
         <div class="modal-content">
             <span class="close-modal" onclick="closeEditModal()">&times;</span>
@@ -1736,40 +2152,52 @@ $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining')";
             </form>
         </div>
     </div>
+    <?php endif; ?>
 
-    <!-- Delete Confirmation Form (Hidden) -->
+    <!-- Delete Confirmation Form -->
+    <?php if ($userRole === 'Controller'): ?>
     <form method="POST" action="" id="deleteForm" style="display: none;">
         <input type="hidden" name="action" value="delete">
         <input type="hidden" name="day" value="<?php echo $selectedDay; ?>">
         <input type="hidden" name="id" id="deleteId">
     </form>
+    <?php endif; ?>
 
     <script>
         let selectedSeats = [];
+        const userRole = '<?php echo $userRole; ?>';
 
-function showSeatInfo(seatId, customerName, remaining) {
-    const modal = document.getElementById('seatInfoModal');
-    const content = document.getElementById('seatInfoContent');
-    const remainingInfo = document.getElementById('seatInfoRemaining');
-    
-    document.getElementById('seatInfoSeatId').textContent = seatId;
-    document.getElementById('seatInfoCustomerName').textContent = customerName;
-    
-    if (remaining && parseFloat(remaining) > 0) {
-        content.classList.add('unpaid');
-        remainingInfo.style.display = 'block';
-        remainingInfo.innerHTML = '💰 Remaining Amount: <br><strong>EGP ' + parseFloat(remaining).toFixed(2) + '</strong>';
-    } else {
-        content.classList.remove('unpaid');
-        remainingInfo.style.display = 'none';
-    }
-    
-    modal.classList.add('active');
-}
-
-function closeSeatInfo() {
-    document.getElementById('seatInfoModal').classList.remove('active');
-}
+        function showSeatInfo(seatId, customerName, remaining, isPending) {
+            const modal = document.getElementById('seatInfoModal');
+            const content = document.getElementById('seatInfoContent');
+            const remainingInfo = document.getElementById('seatInfoRemaining');
+            const statusElement = document.getElementById('seatInfoStatus');
+            
+            document.getElementById('seatInfoSeatId').textContent = seatId;
+            document.getElementById('seatInfoCustomerName').textContent = customerName;
+            
+            if (isPending) {
+                statusElement.textContent = '⏳ Status: Pending Approval';
+                statusElement.style.color = '#5D5978';
+                statusElement.style.fontWeight = 'bold';
+                statusElement.style.display = 'block';
+                content.style.borderColor = '#5D5978';
+            } else {
+                statusElement.style.display = 'none';
+                content.style.borderColor = '#4CAF50';
+            }
+            
+            if (remaining && parseFloat(remaining) > 0) {
+                content.classList.add('unpaid');
+                remainingInfo.style.display = 'block';
+                remainingInfo.innerHTML = '💰 Remaining Amount: <br><strong>EGP ' + parseFloat(remaining).toFixed(2) + '</strong>';
+            } else {
+                content.classList.remove('unpaid');
+                remainingInfo.style.display = 'none';
+            }
+            
+            modal.classList.add('active');
+        }
 
         function closeSeatInfo() {
             document.getElementById('seatInfoModal').classList.remove('active');
@@ -1779,11 +2207,10 @@ function closeSeatInfo() {
             const seatId = element.getAttribute('data-seat');
             
             if (element.classList.contains('selected')) {
-                // Deselect seat
                 element.classList.remove('selected');
                 selectedSeats = selectedSeats.filter(seat => seat !== seatId);
             } else {
-                // Select seat
+
                 element.classList.add('selected');
                 selectedSeats.push(seatId);
             }
@@ -1809,8 +2236,6 @@ function closeSeatInfo() {
             const modal = document.getElementById('reservationModal');
             const selectedSeatsList = document.getElementById('selectedSeatsList');
             const selectedSeatsInput = document.getElementById('selectedSeatsInput');
-            
-            // Update selected seats display
             selectedSeatsList.innerHTML = '';
             selectedSeats.forEach(seat => {
                 const tag = document.createElement('span');
@@ -1818,8 +2243,7 @@ function closeSeatInfo() {
                 tag.textContent = seat;
                 selectedSeatsList.appendChild(tag);
             });
-            
-            // Update hidden input
+
             selectedSeatsInput.value = selectedSeats.join(', ');
             
             modal.classList.add('active');
@@ -1848,6 +2272,7 @@ function closeSeatInfo() {
             }
         }
 
+        <?php if ($userRole === 'Controller'): ?>
         function openEditModal(reservation) {
             document.getElementById('editId').value = reservation.id;
             document.getElementById('edit_customer_name').value = reservation.customer_name;
@@ -1868,30 +2293,31 @@ function closeSeatInfo() {
                 document.getElementById('deleteForm').submit();
             }
         }
-
-        // Close modals when clicking outside
+        <?php endif; ?>
         window.onclick = function(event) {
             const reservationModal = document.getElementById('reservationModal');
-            const editModal = document.getElementById('editModal');
             const seatInfoModal = document.getElementById('seatInfoModal');
             
             if (event.target === reservationModal) {
                 closeReservationModal();
             }
-            if (event.target === editModal) {
-                closeEditModal();
-            }
             if (event.target === seatInfoModal) {
                 closeSeatInfo();
             }
+            
+            <?php if ($userRole === 'Controller'): ?>
+            const editModal = document.getElementById('editModal');
+            if (event.target === editModal) {
+                closeEditModal();
+            }
+            <?php endif; ?>
         }
 
-        // Form validation
         document.getElementById('reservationForm').addEventListener('submit', function(e) {
             const unpaidCheckbox = document.getElementById('unpaidCheckbox');
             const remainingInput = document.getElementById('remaining');
             
-            if (unpaidCheckbox.checked) {
+            if (unpaidCheckbox && unpaidCheckbox.checked) {
                 const remainingValue = parseFloat(remainingInput.value);
                 if (isNaN(remainingValue) || remainingValue <= 0) {
                     e.preventDefault();
@@ -1899,6 +2325,15 @@ function closeSeatInfo() {
                     return false;
                 }
             }
+            
+            <?php if ($userRole === 'Viewer'): ?>
+            const comment = document.getElementById('comment').value.trim();
+            if (comment.length === 0) {
+                e.preventDefault();
+                alert('Please add a comment for your reservation');
+                return false;
+            }
+            <?php endif; ?>
         });
     </script>
 </body>

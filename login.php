@@ -54,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header("Location: index.php");
             exit;
         } else {
-            $error = 'Invalid email address. Please contact the administrator.';
+            $error = 'Invalid email address.';
         }
     }
 }
@@ -227,8 +227,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body>
     <div class="login-container">
         <img src="logo.jpg" alt="Bi Angelos Theatre" class="logo">
-        <h1>Welcome Back</h1>
-        <p class="subtitle">Login to Access Reservation System</p>
         
         <?php if ($error): ?>
             <div class="error-message">
@@ -240,20 +238,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="form-group">
                 <label for="email">Email Address</label>
                 <input type="email" id="email" name="email" required autofocus 
-                       placeholder="Enter your registered email">
+                       placeholder="....">
             </div>
             
             <button type="submit" class="login-btn">Login</button>
         </form>
         
-        <div class="security-badge">
-            Stay logged in for 30 days
-        </div>
-        
-        <p class="info-text">
-            Your login will be remembered for 30 days. <br>
-            Contact the administrator if you need access.
-        </p>
     </div>
 </body>
 </html>
