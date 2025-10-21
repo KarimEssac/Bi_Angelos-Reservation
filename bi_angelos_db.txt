@@ -1,0 +1,22 @@
+1- reservations_7nov (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_name VARCHAR(100) NOT NULL,
+    phone_number VARCHAR(20) NOT NULL,
+    reserved_desks TEXT NOT NULL,  -- e.g. "A1, A2, B3"
+    remaining DECIMAL(10,2) NOT NULL,      -- how much is still owed
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+2- reservations_8nov (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_name VARCHAR(100) NOT NULL,
+    phone_number VARCHAR(20) NOT NULL,
+    reserved_desks TEXT NOT NULL,
+    remaining DECIMAL(10,2) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+3- accounts (
+    email VARCHAR(100) NOT NULL UNIQUE,
+    role ENUM('Controller', 'Viewer') NOT NULL
+);
+
