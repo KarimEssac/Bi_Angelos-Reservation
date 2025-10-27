@@ -1,15 +1,6 @@
 <?php
 require_once 'auth_check.php';
-$host = 'localhost';
-$dbname = 'bi_angelos_2025';
-$username = 'root';
-$password = '';
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch(PDOException $e) {
-    die("Connection failed: " . $e->getMessage());
-}
+require_once 'db.php';
 
 try {
     $tables = ['reservations_7nov', 'reservations_8nov'];
