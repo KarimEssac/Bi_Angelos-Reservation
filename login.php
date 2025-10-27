@@ -27,17 +27,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($email)) {
         $error = 'Please enter your email address';
     } else {
-        // Check if email exists in accounts table
         $stmt = $pdo->prepare("SELECT email, role FROM accounts WHERE email = ?");
         $stmt->execute([$email]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
         
         if ($user) {
-            // Set session variables
             $_SESSION['user_email'] = $user['email'];
             $_SESSION['user_role'] = $user['role'];
-            
-            // Set persistent cookie (30 days)
             $token = hash('sha256', $email . 'bi_angelos_secret_salt');
             setcookie('user_email', $email, time() + (30 * 24 * 60 * 60), '/', '', false, true);
             setcookie('user_token', $token, time() + (30 * 24 * 60 * 60), '/', '', false, true);
@@ -196,7 +192,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         
         .security-badge::before {
-            content: '🔒';
             font-size: 16px;
         }
         

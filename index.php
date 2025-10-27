@@ -165,6 +165,51 @@ function isSeatPending($seat, $pendingSeats) {
 function isSoundControl($row, $seatNum) {
     return (($row === 'PR' || $row === 'OR') && $seatNum >= 1 && $seatNum <= 3);
 }
+
+// Calculate Total Collected
+// Calculate Total Collected
+function calculateTotalCollected($reservations) {
+    // Oct 27, 2024 00:00:00 (already in +02:00 timezone from database)
+    $cutoffDate = strtotime('2025-10-27 00:00:00');
+    
+    $revenue80 = 0;
+    $revenue100 = 0;
+    $count80 = 0;
+    $count100 = 0;
+    
+    foreach ($reservations as $reservation) {
+        $customerName = trim($reservation['customer_name']);
+        $createdAt = strtotime($reservation['created_at']);
+        $seats = explode(',', $reservation['reserved_desks']);
+        $seatCount = count($seats);
+        
+        // Determine price per seat
+        if ($customerName === 'Sponsors') {
+            // Sponsors: Free (0 EGP)
+            continue;
+        } elseif ($customerName === 'Kirolos Ayman') {
+            // Kirolos Ayman: Always 100 EGP per seat
+            $revenue100 += $seatCount * 100;
+            $count100 += $seatCount;
+        } elseif ($createdAt < $cutoffDate) {
+            // Before Oct 27, 00:00 (+02:00): 80 EGP per seat
+            $revenue80 += $seatCount * 80;
+            $count80 += $seatCount;
+        } else {
+            // From Oct 27, 00:00 (+02:00) onwards: 100 EGP per seat
+            $revenue100 += $seatCount * 100;
+            $count100 += $seatCount;
+        }
+    }
+    
+    return [
+        'revenue_80' => $revenue80,
+        'revenue_100' => $revenue100,
+        'count_80' => $count80,
+        'count_100' => $count100,
+        'total_revenue' => $revenue80 + $revenue100
+    ];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -669,6 +714,10 @@ function isSoundControl($row, $seatNum) {
             background: linear-gradient(135deg, #4CAF50 0%, #66bb6a 50%, #81c784 100%);
         }
 
+        .stat-card:nth-child(4) {
+            background: linear-gradient(135deg, #9C27B0 0%, #BA68C8 50%, #CE93D8 100%);
+        }
+
         .stat-number {
             font-size: 42px;
             font-weight: bold;
@@ -709,6 +758,30 @@ function isSoundControl($row, $seatNum) {
             0% { transform: translateX(-100%); }
             100% { transform: translateX(100%); }
         }
+
+        .revenue-card {
+            background: linear-gradient(135deg, #9C27B0 0%, #BA68C8 50%, #CE93D8 100%);
+            grid-column: span 1;
+        }
+
+        .revenue-breakdown {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 2px solid rgba(255, 255, 255, 0.3);
+            font-size: 11px;
+            text-align: left;
+            line-height: 1.8;
+        }
+
+        .revenue-breakdown div {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+
+        .revenue-breakdown strong {
+            font-weight: 700;
+        }
         
         .legend {
             text-align: center;
@@ -745,7 +818,8 @@ function isSoundControl($row, $seatNum) {
             border-radius: 3px;
         }
         
-        .legend-box.available {
+        .legend-box.available
+        {
             background-color: white;
         }
         
@@ -1879,6 +1953,7 @@ for ($i = 1; $i <= 11; $i++):
             $totalReservations = count($approvedReservations);
             $totalSeatsReserved = count($reservedSeats);
             $totalRemaining = array_sum(array_column($approvedReservations, 'remaining'));
+            $collectedData = calculateTotalCollected($approvedReservations);
             ?>
 
             <div class="stats-container">
@@ -1893,6 +1968,20 @@ for ($i = 1; $i <= 11; $i++):
                 <div class="stat-card">
                     <div class="stat-number">EGP <?php echo number_format($totalRemaining, 2); ?></div>
                     <div class="stat-label">Total Remaining</div>
+                </div>
+                <div class="stat-card revenue-card">
+                    <div class="stat-number">EGP <?php echo number_format($collectedData['total_revenue'], 2); ?></div>
+                    <div class="stat-label">Total Collected</div>
+                    <div class="revenue-breakdown">
+                        <div>
+                            <span>80 EGP Tickets:</span>
+                            <strong><?php echo $collectedData['count_80']; ?> × 80 = EGP <?php echo number_format($collectedData['revenue_80'], 2); ?></strong>
+                        </div>
+                        <div>
+                            <span>100 EGP Tickets:</span>
+                            <strong><?php echo $collectedData['count_100']; ?> × 100 = EGP <?php echo number_format($collectedData['revenue_100'], 2); ?></strong>
+                        </div>
+                    </div>
                 </div>
             </div>
 
