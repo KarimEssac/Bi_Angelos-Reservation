@@ -114,6 +114,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 $selectedDay = isset($_GET['day']) ? $_GET['day'] : '7nov';
 $tableName = 'reservations_' . $selectedDay;
 $selectedTab = isset($_GET['tab']) ? $_GET['tab'] : 'map';
+
+if ($selectedTab === 'reservations' && $userRole === 'Viewer') {
+    $selectedTab = 'map';
+}
 $stmt = $pdo->query("SELECT * FROM $tableName ORDER BY created_at DESC");
 $allReservations = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $pendingReservations = array_filter($allReservations, function($res) {
@@ -1711,16 +1715,11 @@ function calculateTotalCollected($reservations) {
         </div>
 
         <div class="tab-navigation">
-            <a href="?day=<?php echo $selectedDay; ?>&tab=map" class="tab-button <?php echo $selectedTab === 'map' ? 'active' : ''; ?>">
-                Theatre Map
-            </a>
-            <a href="?day=<?php echo $selectedDay; ?>&tab=reservations" class="tab-button <?php echo $selectedTab === 'reservations' ? 'active' : ''; ?>">
-                Reservations Data
-                <?php if (count($pendingReservations) > 0): ?>
-                    <span class="pending-badge"><?php echo count($pendingReservations); ?> Pending</span>
-                <?php endif; ?>
-            </a>
-        </div>
+    <a href="?day=<?php echo $selectedDay; ?>&tab=map" class="tab-button <?php echo $selectedTab === 'map' ? 'active' : ''; ?>"><span>Seat Map</span></a>
+    <?php if ($userRole !== 'Viewer'): ?>
+        <a href="?day=<?php echo $selectedDay; ?>&tab=reservations" class="tab-button <?php echo $selectedTab === 'reservations' ? 'active' : ''; ?>"><span>Reservations Data</span></a>
+    <?php endif; ?>
+</div>
 
         <!-- Theatre Map Tab -->
         <div class="tab-content <?php echo $selectedTab === 'map' ? 'active' : ''; ?>">
@@ -2244,177 +2243,180 @@ for ($i = 1; $i <= 11; $i++):
     <?php endif; ?>
 
     <script>
-        let selectedSeats = [];
-        const userRole = '<?php echo $userRole; ?>';
+    let selectedSeats = [];
+    const userRole = '<?php echo $userRole; ?>';
 
-        function showSeatInfo(seatId, customerName, remaining, isPending) {
-            const modal = document.getElementById('seatInfoModal');
-            const content = document.getElementById('seatInfoContent');
-            const remainingInfo = document.getElementById('seatInfoRemaining');
-            const statusElement = document.getElementById('seatInfoStatus');
-            
-            document.getElementById('seatInfoSeatId').textContent = seatId;
-            document.getElementById('seatInfoCustomerName').textContent = customerName;
-            
-            if (isPending) {
-                statusElement.textContent = '⏳ Status: Pending Approval';
-                statusElement.style.color = '#5D5978';
-                statusElement.style.fontWeight = 'bold';
-                statusElement.style.display = 'block';
-                content.style.borderColor = '#5D5978';
-            } else {
-                statusElement.style.display = 'none';
-                content.style.borderColor = '#4CAF50';
-            }
-            
+    function showSeatInfo(seatId, customerName, remaining, isPending) {
+        const modal = document.getElementById('seatInfoModal');
+        const content = document.getElementById('seatInfoContent');
+        const remainingInfo = document.getElementById('seatInfoRemaining');
+        const statusElement = document.getElementById('seatInfoStatus');
+        
+        document.getElementById('seatInfoSeatId').textContent = seatId;
+        document.getElementById('seatInfoCustomerName').textContent = customerName;
+        
+        if (isPending) {
+            statusElement.textContent = '⏳ Status: Pending Approval';
+            statusElement.style.color = '#5D5978';
+            statusElement.style.fontWeight = 'bold';
+            statusElement.style.display = 'block';
+            content.style.borderColor = '#5D5978';
+        } else {
+            statusElement.style.display = 'none';
             if (remaining && parseFloat(remaining) > 0) {
-                content.classList.add('unpaid');
-                remainingInfo.style.display = 'block';
-                remainingInfo.innerHTML = '💰 Remaining Amount: <br><strong>EGP ' + parseFloat(remaining).toFixed(2) + '</strong>';
+                content.style.borderColor = '#A1CAE3'; // Cyan/light blue for unpaid, matching theme
             } else {
-                content.classList.remove('unpaid');
-                remainingInfo.style.display = 'none';
-            }
-            
-            modal.classList.add('active');
-        }
-
-        function closeSeatInfo() {
-            document.getElementById('seatInfoModal').classList.remove('active');
-        }
-
-        function toggleSeat(element) {
-            const seatId = element.getAttribute('data-seat');
-            
-            if (element.classList.contains('selected')) {
-                element.classList.remove('selected');
-                selectedSeats = selectedSeats.filter(seat => seat !== seatId);
-            } else {
-
-                element.classList.add('selected');
-                selectedSeats.push(seatId);
-            }
-            
-            updateReservationButton();
-        }
-
-        function updateReservationButton() {
-            const actionButton = document.getElementById('reservationAction');
-            const countElement = document.getElementById('selectedCount');
-            
-            if (selectedSeats.length > 0) {
-                actionButton.classList.add('visible');
-                countElement.textContent = selectedSeats.length;
-            } else {
-                actionButton.classList.remove('visible');
+                content.style.borderColor = '#4CAF50'; // Green for paid
             }
         }
-
-        function openReservationModal() {
-            if (selectedSeats.length === 0) return;
-            
-            const modal = document.getElementById('reservationModal');
-            const selectedSeatsList = document.getElementById('selectedSeatsList');
-            const selectedSeatsInput = document.getElementById('selectedSeatsInput');
-            selectedSeatsList.innerHTML = '';
-            selectedSeats.forEach(seat => {
-                const tag = document.createElement('span');
-                tag.className = 'selected-seat-tag';
-                tag.textContent = seat;
-                selectedSeatsList.appendChild(tag);
-            });
-
-            selectedSeatsInput.value = selectedSeats.join(', ');
-            
-            modal.classList.add('active');
+        
+        if (remaining && parseFloat(remaining) > 0) {
+            content.classList.add('unpaid');
+            remainingInfo.style.display = 'block';
+            remainingInfo.innerHTML = '💰 Remaining Amount: <br><strong>EGP ' + parseFloat(remaining).toFixed(2) + '</strong>';
+        } else {
+            content.classList.remove('unpaid');
+            remainingInfo.style.display = 'none';
         }
+        
+        modal.classList.add('active');
+    }
 
-        function closeReservationModal() {
-            const modal = document.getElementById('reservationModal');
-            modal.classList.remove('active');
+    function closeSeatInfo() {
+        document.getElementById('seatInfoModal').classList.remove('active');
+    }
+
+    function toggleSeat(element) {
+        const seatId = element.getAttribute('data-seat');
+        
+        if (element.classList.contains('selected')) {
+            element.classList.remove('selected');
+            selectedSeats = selectedSeats.filter(seat => seat !== seatId);
+        } else {
+            element.classList.add('selected');
+            selectedSeats.push(seatId);
         }
+        
+        updateReservationButton();
+    }
 
-        function toggleRemainingInput() {
-            const checkbox = document.getElementById('unpaidCheckbox');
-            const remainingGroup = document.getElementById('remainingGroup');
-            const remainingInput = document.getElementById('remaining');
-            const isPaidInput = document.getElementById('isPaidInput');
-            
-            if (checkbox.checked) {
-                remainingGroup.classList.add('visible');
-                remainingInput.required = true;
-                isPaidInput.value = '0';
-            } else {
-                remainingGroup.classList.remove('visible');
-                remainingInput.required = false;
-                remainingInput.value = '0';
-                isPaidInput.value = '1';
-            }
+    function updateReservationButton() {
+        const actionButton = document.getElementById('reservationAction');
+        const countElement = document.getElementById('selectedCount');
+        
+        if (selectedSeats.length > 0) {
+            actionButton.classList.add('visible');
+            countElement.textContent = selectedSeats.length;
+        } else {
+            actionButton.classList.remove('visible');
         }
+    }
 
+    function openReservationModal() {
+        if (selectedSeats.length === 0) return;
+        
+        const modal = document.getElementById('reservationModal');
+        const selectedSeatsList = document.getElementById('selectedSeatsList');
+        const selectedSeatsInput = document.getElementById('selectedSeatsInput');
+        selectedSeatsList.innerHTML = '';
+        selectedSeats.forEach(seat => {
+            const tag = document.createElement('span');
+            tag.className = 'selected-seat-tag';
+            tag.textContent = seat;
+            selectedSeatsList.appendChild(tag);
+        });
+
+        selectedSeatsInput.value = selectedSeats.join(', ');
+        
+        modal.classList.add('active');
+    }
+
+    function closeReservationModal() {
+        const modal = document.getElementById('reservationModal');
+        modal.classList.remove('active');
+    }
+
+    function toggleRemainingInput() {
+        const checkbox = document.getElementById('unpaidCheckbox');
+        const remainingGroup = document.getElementById('remainingGroup');
+        const remainingInput = document.getElementById('remaining');
+        const isPaidInput = document.getElementById('isPaidInput');
+        
+        if (checkbox.checked) {
+            remainingGroup.classList.add('visible');
+            remainingInput.required = true;
+            isPaidInput.value = '0';
+        } else {
+            remainingGroup.classList.remove('visible');
+            remainingInput.required = false;
+            remainingInput.value = '0';
+            isPaidInput.value = '1';
+        }
+    }
+
+    <?php if ($userRole === 'Controller'): ?>
+    function openEditModal(reservation) {
+        document.getElementById('editId').value = reservation.id;
+        document.getElementById('edit_customer_name').value = reservation.customer_name;
+        document.getElementById('edit_phone_number').value = reservation.phone_number;
+        document.getElementById('edit_reserved_desks').value = reservation.reserved_desks;
+        document.getElementById('edit_remaining').value = reservation.remaining;
+        
+        document.getElementById('editModal').classList.add('active');
+    }
+
+    function closeEditModal() {
+        document.getElementById('editModal').classList.remove('active');
+    }
+
+    function confirmDelete(id) {
+        if (confirm('Are you sure you want to delete this reservation? This action cannot be undone.')) {
+            document.getElementById('deleteId').value = id;
+            document.getElementById('deleteForm').submit();
+        }
+    }
+    <?php endif; ?>
+    window.onclick = function(event) {
+        const reservationModal = document.getElementById('reservationModal');
+        const seatInfoModal = document.getElementById('seatInfoModal');
+        
+        if (event.target === reservationModal) {
+            closeReservationModal();
+        }
+        if (event.target === seatInfoModal) {
+            closeSeatInfo();
+        }
+        
         <?php if ($userRole === 'Controller'): ?>
-        function openEditModal(reservation) {
-            document.getElementById('editId').value = reservation.id;
-            document.getElementById('edit_customer_name').value = reservation.customer_name;
-            document.getElementById('edit_phone_number').value = reservation.phone_number;
-            document.getElementById('edit_reserved_desks').value = reservation.reserved_desks;
-            document.getElementById('edit_remaining').value = reservation.remaining;
-            
-            document.getElementById('editModal').classList.add('active');
-        }
-
-        function closeEditModal() {
-            document.getElementById('editModal').classList.remove('active');
-        }
-
-        function confirmDelete(id) {
-            if (confirm('Are you sure you want to delete this reservation? This action cannot be undone.')) {
-                document.getElementById('deleteId').value = id;
-                document.getElementById('deleteForm').submit();
-            }
+        const editModal = document.getElementById('editModal');
+        if (event.target === editModal) {
+            closeEditModal();
         }
         <?php endif; ?>
-        window.onclick = function(event) {
-            const reservationModal = document.getElementById('reservationModal');
-            const seatInfoModal = document.getElementById('seatInfoModal');
-            
-            if (event.target === reservationModal) {
-                closeReservationModal();
-            }
-            if (event.target === seatInfoModal) {
-                closeSeatInfo();
-            }
-            
-            <?php if ($userRole === 'Controller'): ?>
-            const editModal = document.getElementById('editModal');
-            if (event.target === editModal) {
-                closeEditModal();
-            }
-            <?php endif; ?>
-        }
+    }
 
-        document.getElementById('reservationForm').addEventListener('submit', function(e) {
-            const unpaidCheckbox = document.getElementById('unpaidCheckbox');
-            const remainingInput = document.getElementById('remaining');
-            
-            if (unpaidCheckbox && unpaidCheckbox.checked) {
-                const remainingValue = parseFloat(remainingInput.value);
-                if (isNaN(remainingValue) || remainingValue <= 0) {
-                    e.preventDefault();
-                    alert('Please enter a valid remaining amount greater than 0');
-                    return false;
-                }
-            }
-            
-            <?php if ($userRole === 'Viewer'): ?>
-            const comment = document.getElementById('comment').value.trim();
-            if (comment.length === 0) {
+    document.getElementById('reservationForm').addEventListener('submit', function(e) {
+        const unpaidCheckbox = document.getElementById('unpaidCheckbox');
+        const remainingInput = document.getElementById('remaining');
+        
+        if (unpaidCheckbox && unpaidCheckbox.checked) {
+            const remainingValue = parseFloat(remainingInput.value);
+            if (isNaN(remainingValue) || remainingValue <= 0) {
                 e.preventDefault();
-                alert('Please add a comment for your reservation');
+                alert('Please enter a valid remaining amount greater than 0');
                 return false;
             }
-            <?php endif; ?>
-        });
-    </script>
+        }
+        
+        <?php if ($userRole === 'Viewer'): ?>
+        const comment = document.getElementById('comment').value.trim();
+        if (comment.length === 0) {
+            e.preventDefault();
+            alert('Please add a comment for your reservation');
+            return false;
+        }
+        <?php endif; ?>
+    });
+</script>
 </body>
 </html>
