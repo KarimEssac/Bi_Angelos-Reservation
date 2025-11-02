@@ -75,12 +75,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $phoneNumber = trim($_POST['phone_number']);
     $selectedSeats = $_POST['reserved_desks'];
     $remaining = floatval($_POST['remaining']);
+    $promotion = isset($_POST['promotion']) && $_POST['promotion'] === '1' ? 1 : 0;
     
     $tableName = 'reservations_' . $day;
     
     try {
-        $stmt = $pdo->prepare("UPDATE $tableName SET customer_name = ?, phone_number = ?, reserved_desks = ?, remaining = ? WHERE id = ?");
-        $stmt->execute([$customerName, $phoneNumber, $selectedSeats, $remaining, $id]);
+        $stmt = $pdo->prepare("UPDATE $tableName SET customer_name = ?, phone_number = ?, reserved_desks = ?, remaining = ?, promotion = ? WHERE id = ?");
+        $stmt->execute([$customerName, $phoneNumber, $selectedSeats, $remaining, $promotion, $id]);
         
         header("Location: ?day=$day&tab=reservations&updated=1");
         exit;
@@ -97,12 +98,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $isPaid = isset($_POST['is_paid']) && $_POST['is_paid'] === '1';
     $remaining = $isPaid ? 0 : floatval($_POST['remaining']);
     $comment = isset($_POST['comment']) ? trim($_POST['comment']) : '';
+    $promotion = isset($_POST['promotion']) && $_POST['promotion'] === '1' ? 1 : 0;
     $pending = ($userRole === 'Viewer') ? 1 : 0;
     $tableName = 'reservations_' . $day;
     
     try {
-        $stmt = $pdo->prepare("INSERT INTO $tableName (customer_name, phone_number, reserved_desks, remaining, pending, comment) VALUES (?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$customerName, $phoneNumber, $selectedSeats, $remaining, $pending, $comment]);
+        $stmt = $pdo->prepare("INSERT INTO $tableName (customer_name, phone_number, reserved_desks, remaining, pending, comment, promotion) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$customerName, $phoneNumber, $selectedSeats, $remaining, $pending, $comment, $promotion]);
         
         header("Location: ?day=$day&tab=map&success=1");
         exit;
@@ -171,47 +173,66 @@ function isSoundControl($row, $seatNum) {
 }
 
 // Calculate Total Collected
-// Calculate Total Collected
 function calculateTotalCollected($reservations) {
-    // Oct 27, 2024 00:00:00 (already in +02:00 timezone from database)
     $cutoffDate = strtotime('2025-10-27 00:00:00');
-    
-    $revenue80 = 0;
+
+    $revenue80  = 0;
     $revenue100 = 0;
-    $count80 = 0;
-    $count100 = 0;
-    
+    $revenuePromo = 0;
+    $count80    = 0;
+    $count100   = 0;
+    $countPromo = 0;
+
     foreach ($reservations as $reservation) {
         $customerName = trim($reservation['customer_name']);
-        $createdAt = strtotime($reservation['created_at']);
-        $seats = explode(',', $reservation['reserved_desks']);
-        $seatCount = count($seats);
-        
-        // Determine price per seat
+        $createdAt    = strtotime($reservation['created_at']);
+        $seats        = explode(',', $reservation['reserved_desks']);
+        $seatCount    = count($seats);
+        $hasPromotion = isset($reservation['promotion']) && $reservation['promotion'] == 1;
+
+        if (stripos($customerName, 'MYF') !== false) {
+            $revenue80 += $seatCount * 80;
+            $count80   += $seatCount;
+            continue;
+        }
+
         if ($customerName === 'Sponsors') {
-            // Sponsors: Free (0 EGP)
             continue;
         } elseif ($customerName === 'Kirolos Ayman') {
-            // Kirolos Ayman: Always 100 EGP per seat
-            $revenue100 += $seatCount * 100;
-            $count100 += $seatCount;
+            if ($hasPromotion) {
+                $revenuePromo += $seatCount * 90;
+                $countPromo   += $seatCount;
+            } else {
+                $revenue100 += $seatCount * 100;
+                $count100   += $seatCount;
+            }
         } elseif ($createdAt < $cutoffDate) {
-            // Before Oct 27, 00:00 (+02:00): 80 EGP per seat
-            $revenue80 += $seatCount * 80;
-            $count80 += $seatCount;
+            if ($hasPromotion) {
+                $revenuePromo += $seatCount * 72; // 80 * 0.9
+                $countPromo   += $seatCount;
+            } else {
+                $revenue80 += $seatCount * 80;
+                $count80   += $seatCount;
+            }
         } else {
-            // From Oct 27, 00:00 (+02:00) onwards: 100 EGP per seat
-            $revenue100 += $seatCount * 100;
-            $count100 += $seatCount;
+            if ($hasPromotion) {
+                $revenuePromo += $seatCount * 90; // 100 * 0.9
+                $countPromo   += $seatCount;
+            } else {
+                $revenue100 += $seatCount * 100;
+                $count100   += $seatCount;
+            }
         }
     }
-    
+
     return [
-        'revenue_80' => $revenue80,
-        'revenue_100' => $revenue100,
-        'count_80' => $count80,
-        'count_100' => $count100,
-        'total_revenue' => $revenue80 + $revenue100
+        'revenue_80'    => $revenue80,
+        'revenue_100'   => $revenue100,
+        'revenue_promo' => $revenuePromo,
+        'count_80'      => $count80,
+        'count_100'     => $count100,
+        'count_promo'   => $countPromo,
+        'total_revenue' => $revenue80 + $revenue100 + $revenuePromo
     ];
 }
 ?>
@@ -1980,8 +2001,12 @@ for ($i = 1; $i <= 11; $i++):
                             <span>100 EGP Tickets:</span>
                             <strong><?php echo $collectedData['count_100']; ?> × 100 = EGP <?php echo number_format($collectedData['revenue_100'], 2); ?></strong>
                         </div>
-                    </div>
-                </div>
+                    <div>
+            <span>Promotion Tickets:</span>
+            <strong><?php echo $collectedData['count_promo']; ?> × 90 = EGP <?php echo number_format($collectedData['revenue_promo'], 2); ?></strong>
+        </div>
+    </div>
+</div>
             </div>
 
             <?php if ($userRole === 'Controller' && count($pendingReservations) > 0): ?>
@@ -2168,9 +2193,14 @@ for ($i = 1; $i <= 11; $i++):
                 </div>
 
                 <div class="checkbox-group">
-                    <input type="checkbox" id="unpaidCheckbox" name="is_unpaid" value="1" onchange="toggleRemainingInput()">
-                    <label for="unpaidCheckbox">Unpaid Reservation (Has Remaining Amount)</label>
-                </div>
+    <input type="checkbox" id="unpaidCheckbox" name="is_unpaid" value="1" onchange="toggleRemainingInput()">
+    <label for="unpaidCheckbox">Unpaid Reservation (Has Remaining Amount)</label>
+</div>
+
+<div class="checkbox-group">
+    <input type="checkbox" id="promotionCheckbox" name="promotion" value="1">
+    <label for="promotionCheckbox">🎟️ Used Promotion (10% Discount)</label>
+</div>
 
                 <div class="form-group remaining-input" id="remainingGroup">
                     <label for="remaining">Remaining Amount (EGP) *</label>
@@ -2223,11 +2253,16 @@ for ($i = 1; $i <= 11; $i++):
                 </div>
 
                 <div class="form-group">
-                    <label for="edit_remaining">Remaining Amount (EGP) *</label>
-                    <input type="number" id="edit_remaining" name="remaining" min="0" step="0.01" required>
-                </div>
+    <label for="edit_remaining">Remaining Amount (EGP) *</label>
+    <input type="number" id="edit_remaining" name="remaining" min="0" step="0.01" required>
+</div>
 
-                <button type="submit" class="submit-btn">Update Reservation</button>
+<div class="checkbox-group">
+    <input type="checkbox" id="edit_promotion" name="promotion" value="1">
+    <label for="edit_promotion">🎟️ Used Promotion (10% Discount)</label>
+</div>
+
+<button type="submit" class="submit-btn">Update Reservation</button>
             </form>
         </div>
     </div>
@@ -2356,14 +2391,15 @@ for ($i = 1; $i <= 11; $i++):
 
     <?php if ($userRole === 'Controller'): ?>
     function openEditModal(reservation) {
-        document.getElementById('editId').value = reservation.id;
-        document.getElementById('edit_customer_name').value = reservation.customer_name;
-        document.getElementById('edit_phone_number').value = reservation.phone_number;
-        document.getElementById('edit_reserved_desks').value = reservation.reserved_desks;
-        document.getElementById('edit_remaining').value = reservation.remaining;
-        
-        document.getElementById('editModal').classList.add('active');
-    }
+    document.getElementById('editId').value = reservation.id;
+    document.getElementById('edit_customer_name').value = reservation.customer_name;
+    document.getElementById('edit_phone_number').value = reservation.phone_number;
+    document.getElementById('edit_reserved_desks').value = reservation.reserved_desks;
+    document.getElementById('edit_remaining').value = reservation.remaining;
+    document.getElementById('edit_promotion').checked = reservation.promotion == 1;
+    
+    document.getElementById('editModal').classList.add('active');
+}
 
     function closeEditModal() {
         document.getElementById('editModal').classList.remove('active');
