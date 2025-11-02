@@ -6,7 +6,8 @@
     remaining DECIMAL(10,2) NOT NULL,      -- how much is still owed
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     pending BOOLEAN DEFAULT 0,
-    comment TEXT;
+    comment TEXT,
+    promotion BOOLEAN default 0 
 );
 
 2- reservations_8nov (
@@ -18,7 +19,8 @@
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     reservations_8nov
     pending BOOLEAN DEFAULT 0,
-    comment TEXT;
+    comment TEXT,
+    promotion BOOLEAN default 0 
 );
 3- accounts (
     email VARCHAR(100) NOT NULL UNIQUE,
