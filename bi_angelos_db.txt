@@ -1,4 +1,4 @@
-1- reservations_7nov (
+1- reservations_2april (
     id INT AUTO_INCREMENT PRIMARY KEY,
     customer_name VARCHAR(100) NOT NULL,
     phone_number VARCHAR(20) NOT NULL,
@@ -7,21 +7,10 @@
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     pending BOOLEAN DEFAULT 0,
     comment TEXT,
-    promotion BOOLEAN default 0 
+    received_ticket BOOLEAN DEFAULT 0,
+    reserved_by VARCHAR(50) DEFAULT NULL
 );
 
-2- reservations_8nov (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    customer_name VARCHAR(100) NOT NULL,
-    phone_number VARCHAR(20) NOT NULL,
-    reserved_desks TEXT NOT NULL,
-    remaining DECIMAL(10,2) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    reservations_8nov
-    pending BOOLEAN DEFAULT 0,
-    comment TEXT,
-    promotion BOOLEAN default 0 
-);
 3- accounts (
     email VARCHAR(100) NOT NULL UNIQUE,
     role ENUM('Controller', 'Viewer') NOT NULL

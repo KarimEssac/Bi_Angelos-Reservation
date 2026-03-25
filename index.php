@@ -3,7 +3,7 @@ require_once 'auth_check.php';
 require_once 'db.php';
 
 try {
-    $tables = ['reservations_7nov', 'reservations_8nov'];
+    $tables = ['reservations_2april'];
     foreach ($tables as $table) {
         $stmt = $pdo->prepare("DELETE FROM $table WHERE remaining > 0 AND created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)");
         $stmt->execute();
@@ -24,11 +24,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $id = intval($_POST['id']);
     $day = $_POST['day'];
     $tableName = 'reservations_' . $day;
-    
+
     try {
-        $stmt = $pdo->prepare("UPDATE $tableName SET pending = 0 WHERE id = ?");
-        $stmt->execute([$id]);
-        
+        $stmt = $pdo->prepare("UPDATE $tableName SET pending = 0, reserved_by = ? WHERE id = ?");
+        $stmt->execute([$controllerName, $id]);
+
         header("Location: ?day=$day&tab=reservations&approved=1");
         exit;
     } catch(PDOException $e) {
@@ -75,14 +75,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $phoneNumber = trim($_POST['phone_number']);
     $selectedSeats = $_POST['reserved_desks'];
     $remaining = floatval($_POST['remaining']);
-    $promotion = isset($_POST['promotion']) && $_POST['promotion'] === '1' ? 1 : 0;
-    
+    $receivedTicket = isset($_POST['received_ticket']) && $_POST['received_ticket'] === '1' ? 1 : 0;
+    $khedma = isset($_POST['khedma']) && $_POST['khedma'] === '1' ? 1 : 0;
+
     $tableName = 'reservations_' . $day;
-    
+
     try {
-        $stmt = $pdo->prepare("UPDATE $tableName SET customer_name = ?, phone_number = ?, reserved_desks = ?, remaining = ?, promotion = ? WHERE id = ?");
-        $stmt->execute([$customerName, $phoneNumber, $selectedSeats, $remaining, $promotion, $id]);
-        
+        $stmt = $pdo->prepare("UPDATE $tableName SET customer_name = ?, phone_number = ?, reserved_desks = ?, remaining = ?, received_ticket = ?, khedma = ? WHERE id = ?");
+        $stmt->execute([$customerName, $phoneNumber, $selectedSeats, $remaining, $receivedTicket, $khedma, $id]);
+
         header("Location: ?day=$day&tab=reservations&updated=1");
         exit;
     } catch(PDOException $e) {
@@ -98,14 +99,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $isPaid = isset($_POST['is_paid']) && $_POST['is_paid'] === '1';
     $remaining = $isPaid ? 0 : floatval($_POST['remaining']);
     $comment = isset($_POST['comment']) ? trim($_POST['comment']) : '';
-    $promotion = isset($_POST['promotion']) && $_POST['promotion'] === '1' ? 1 : 0;
+    $receivedTicket = isset($_POST['received_ticket']) && $_POST['received_ticket'] === '1' ? 1 : 0;
+    $khedma = isset($_POST['khedma']) && $_POST['khedma'] === '1' ? 1 : 0;
     $pending = ($userRole === 'Viewer') ? 1 : 0;
     $tableName = 'reservations_' . $day;
-    
+
     try {
-        $stmt = $pdo->prepare("INSERT INTO $tableName (customer_name, phone_number, reserved_desks, remaining, pending, comment, promotion) VALUES (?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$customerName, $phoneNumber, $selectedSeats, $remaining, $pending, $comment, $promotion]);
-        
+        $stmt = $pdo->prepare("INSERT INTO $tableName (customer_name, phone_number, reserved_desks, remaining, pending, comment, received_ticket, reserved_by, khedma) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$customerName, $phoneNumber, $selectedSeats, $remaining, $pending, $comment, $receivedTicket, $controllerName, $khedma]);
+
         header("Location: ?day=$day&tab=map&success=1");
         exit;
     } catch(PDOException $e) {
@@ -113,7 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
-$selectedDay = isset($_GET['day']) ? $_GET['day'] : '7nov';
+$selectedDay = '2april';
 $tableName = 'reservations_' . $selectedDay;
 $selectedTab = isset($_GET['tab']) ? $_GET['tab'] : 'map';
 
@@ -174,65 +176,36 @@ function isSoundControl($row, $seatNum) {
 
 // Calculate Total Collected
 function calculateTotalCollected($reservations) {
-    $cutoffDate = strtotime('2025-10-27 00:00:00');
-
-    $revenue80  = 0;
-    $revenue100 = 0;
-    $revenuePromo = 0;
-    $count80    = 0;
-    $count100   = 0;
-    $countPromo = 0;
+    $revenue100  = 0;
+    $count100    = 0;
+    $revenue80   = 0;
+    $count80     = 0;
 
     foreach ($reservations as $reservation) {
         $customerName = trim($reservation['customer_name']);
-        $createdAt    = strtotime($reservation['created_at']);
         $seats        = explode(',', $reservation['reserved_desks']);
         $seatCount    = count($seats);
-        $hasPromotion = isset($reservation['promotion']) && $reservation['promotion'] == 1;
-
-        if (stripos($customerName, 'MYF') !== false) {
-            $revenue80 += $seatCount * 80;
-            $count80   += $seatCount;
-            continue;
-        }
+        $isKhedma     = !empty($reservation['khedma']) && $reservation['khedma'] == 1;
 
         if ($customerName === 'Sponsors') {
             continue;
-        } elseif ($customerName === 'Kirolos Ayman') {
-            if ($hasPromotion) {
-                $revenuePromo += $seatCount * 90;
-                $countPromo   += $seatCount;
-            } else {
-                $revenue100 += $seatCount * 100;
-                $count100   += $seatCount;
-            }
-        } elseif ($createdAt < $cutoffDate) {
-            if ($hasPromotion) {
-                $revenuePromo += $seatCount * 72; // 80 * 0.9
-                $countPromo   += $seatCount;
-            } else {
-                $revenue80 += $seatCount * 80;
-                $count80   += $seatCount;
-            }
+        }
+
+        if ($isKhedma) {
+            $revenue80 += $seatCount * 80;
+            $count80   += $seatCount;
         } else {
-            if ($hasPromotion) {
-                $revenuePromo += $seatCount * 90; // 100 * 0.9
-                $countPromo   += $seatCount;
-            } else {
-                $revenue100 += $seatCount * 100;
-                $count100   += $seatCount;
-            }
+            $revenue100 += $seatCount * 100;
+            $count100   += $seatCount;
         }
     }
 
     return [
-        'revenue_80'    => $revenue80,
         'revenue_100'   => $revenue100,
-        'revenue_promo' => $revenuePromo,
-        'count_80'      => $count80,
         'count_100'     => $count100,
-        'count_promo'   => $countPromo,
-        'total_revenue' => $revenue80 + $revenue100 + $revenuePromo
+        'revenue_80'    => $revenue80,
+        'count_80'      => $count80,
+        'total_revenue' => $revenue100 + $revenue80
     ];
 }
 ?>
@@ -578,6 +551,11 @@ function calculateTotalCollected($reservations) {
             background-color: #fafcfd;
         }
 
+        .reservations-table tbody tr.ticket-received,
+        .reservations-table tbody tr.ticket-received:nth-child(even) {
+            background: linear-gradient(90deg, #e8f5e9 0%, #c8e6c9 100%);
+        }
+
         .remaining-amount {
             font-weight: bold;
             color: #FC723E;
@@ -806,6 +784,95 @@ function calculateTotalCollected($reservations) {
 
         .revenue-breakdown strong {
             font-weight: 700;
+        }
+
+        /* Collector Breakdown Card */
+        .collector-card {
+            background: linear-gradient(135deg, #FFFEFF 0%, #f5f9fc 100%);
+            border-radius: 20px;
+            padding: 25px 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 8px 30px rgba(32, 127, 189, 0.12);
+            border: 2px solid rgba(161, 202, 227, 0.5);
+        }
+
+        .collector-card-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #207FBD;
+            margin-bottom: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #A1CAE3;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .collector-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .collector-row {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: linear-gradient(135deg, #f0f8ff 0%, #e6f3fb 100%);
+            border: 2px solid #A1CAE3;
+            border-radius: 14px;
+            padding: 14px 16px;
+            transition: all 0.3s ease;
+        }
+
+        .collector-row:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(32, 127, 189, 0.2);
+            border-color: #207FBD;
+        }
+
+        .collector-avatar {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #207FBD 0%, #4a9ed1 100%);
+            color: white;
+            font-size: 18px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            box-shadow: 0 4px 10px rgba(32, 127, 189, 0.3);
+        }
+
+        .collector-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .collector-name {
+            font-weight: 700;
+            color: #207FBD;
+            font-size: 15px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .collector-seats {
+            font-size: 12px;
+            color: #666;
+            margin-top: 2px;
+        }
+
+        .collector-total {
+            font-weight: 800;
+            font-size: 15px;
+            color: #FC723E;
+            white-space: nowrap;
         }
         
         .legend {
@@ -1599,6 +1666,27 @@ function calculateTotalCollected($reservations) {
     margin-right: 8px;
 }
 
+.khedma-checkbox-group {
+    border: 2px solid #4CAF50;
+    background: linear-gradient(135deg, rgba(76,175,80,0.08) 0%, rgba(76,175,80,0.04) 100%);
+}
+
+.khedma-checkbox-group label {
+    color: #2e7d32 !important;
+    font-weight: 700 !important;
+}
+
+.khedma-price-info {
+    margin-bottom: 18px;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+    border: 2px solid #4CAF50;
+    border-radius: 10px;
+    color: #1b5e20;
+    font-size: 15px;
+    animation: slideDown 0.3s ease;
+}
+
 .pending-badge {
     display: inline-block;
     background: linear-gradient(135deg, #5D5978 0%, #7a7691 100%);
@@ -1684,11 +1772,14 @@ function calculateTotalCollected($reservations) {
 <body>
     <div class="header">
         <img src="logo.jpg" alt="Bi Angelos Theatre" class="logo">
-        <h1>الساكن في ستر العلي، نظام الحجز</h1>
+        <h1>نظام حجز مسرحية درب الصليب</h1>
         <p class="subtitle">إختار الكرسي اللي تحب تتفرج من عليه</p>
         <div class="user-info">
             <div class="user-badge">
                 <?php echo htmlspecialchars($userEmail); ?>
+                <?php if ($userRole === 'Controller' && !empty($controllerName)): ?>
+                    <span style="margin-left: 5px; color: #FFF;">(<?php echo htmlspecialchars($controllerName); ?>)</span>
+                <?php endif; ?>
                 <span class="role-badge"><?php echo htmlspecialchars($userRole); ?></span>
             </div>
             <a href="?logout=1" class="logout-btn" onclick="return confirm('Are you sure you want to logout?')">Logout</a>
@@ -1730,10 +1821,6 @@ function calculateTotalCollected($reservations) {
             </div>
         <?php endif; ?>
 
-        <div class="day-selector">
-            <a href="?day=7nov&tab=<?php echo $selectedTab; ?>" class="<?php echo $selectedDay === '7nov' ? 'active' : ''; ?>">November 7</a>
-            <a href="?day=8nov&tab=<?php echo $selectedTab; ?>" class="<?php echo $selectedDay === '8nov' ? 'active' : ''; ?>">November 8</a>
-        </div>
 
         <div class="tab-navigation">
     <a href="?day=<?php echo $selectedDay; ?>&tab=map" class="tab-button <?php echo $selectedTab === 'map' ? 'active' : ''; ?>"><span>Seat Map</span></a>
@@ -1993,21 +2080,58 @@ for ($i = 1; $i <= 11; $i++):
                     <div class="stat-number">EGP <?php echo number_format($collectedData['total_revenue'], 2); ?></div>
                     <div class="stat-label">Total Collected</div>
                     <div class="revenue-breakdown">
-                        <div>
-                            <span>80 EGP Tickets:</span>
-                            <strong><?php echo $collectedData['count_80']; ?> × 80 = EGP <?php echo number_format($collectedData['revenue_80'], 2); ?></strong>
-                        </div>
+                        <?php if ($collectedData['count_100'] > 0): ?>
                         <div>
                             <span>100 EGP Tickets:</span>
-                            <strong><?php echo $collectedData['count_100']; ?> × 100 = EGP <?php echo number_format($collectedData['revenue_100'], 2); ?></strong>
+                            <strong><?php echo $collectedData['count_100']; ?> &times; 100 = EGP <?php echo number_format($collectedData['revenue_100'], 2); ?></strong>
                         </div>
-                    <div>
-            <span>Promotion Tickets:</span>
-            <strong><?php echo $collectedData['count_promo']; ?> × 90 = EGP <?php echo number_format($collectedData['revenue_promo'], 2); ?></strong>
-        </div>
-    </div>
-</div>
+                        <?php endif; ?>
+                        <?php if ($collectedData['count_80'] > 0): ?>
+                        <div>
+                            <span>Khedma (80 EGP):</span>
+                            <strong><?php echo $collectedData['count_80']; ?> &times; 80 = EGP <?php echo number_format($collectedData['revenue_80'], 2); ?></strong>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
             </div>
+
+            <?php
+            // Per-collector breakdown
+            $controllerTotals = [];
+            foreach ($approvedReservations as $res) {
+                if (trim($res['customer_name']) === 'Sponsors') continue;
+                $by = !empty($res['reserved_by']) ? trim($res['reserved_by']) : 'Unknown';
+                $seats = explode(',', $res['reserved_desks']);
+                $count = count($seats);
+                $isKhedma = !empty($res['khedma']) && $res['khedma'] == 1;
+                $price = $isKhedma ? 80 : 100;
+                if (!isset($controllerTotals[$by])) $controllerTotals[$by] = ['count' => 0, 'total' => 0];
+                $controllerTotals[$by]['count'] += $count;
+                $controllerTotals[$by]['total'] += $count * $price;
+            }
+            arsort($controllerTotals); // sort by array value order; re-sort by total descending
+            uasort($controllerTotals, fn($a, $b) => $b['total'] <=> $a['total']);
+            if (!empty($controllerTotals)):
+            ?>
+            <div class="collector-card">
+                <div class="collector-card-title">
+                    &#128100; Collected by Controller
+                </div>
+                <div class="collector-grid">
+                    <?php foreach ($controllerTotals as $name => $data): ?>
+                    <div class="collector-row">
+                        <div class="collector-avatar"><?php echo htmlspecialchars(mb_strtoupper(mb_substr($name, 0, 1))); ?></div>
+                        <div class="collector-info">
+                            <div class="collector-name"><?php echo htmlspecialchars($name); ?></div>
+                            <div class="collector-seats"><?php echo $data['count']; ?> seat<?php echo $data['count'] != 1 ? 's' : ''; ?></div>
+                        </div>
+                        <div class="collector-total">EGP <?php echo number_format($data['total'], 2); ?></div>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <?php endif; ?>
 
             <?php if ($userRole === 'Controller' && count($pendingReservations) > 0): ?>
                 <!-- Pending Reservations Section -->
@@ -2029,7 +2153,7 @@ for ($i = 1; $i <= 11; $i++):
                             </thead>
                             <tbody>
                                 <?php foreach ($pendingReservations as $reservation): ?>
-                                    <tr>
+                                    <tr class="<?php echo isset($reservation['received_ticket']) && $reservation['received_ticket'] == 1 ? 'ticket-received' : ''; ?>">
                                         <td><strong>#<?php echo htmlspecialchars($reservation['id']); ?></strong></td>
                                         <td><?php echo htmlspecialchars($reservation['customer_name']); ?></td>
                                         <td><?php echo htmlspecialchars($reservation['phone_number']); ?></td>
@@ -2094,6 +2218,7 @@ for ($i = 1; $i <= 11; $i++):
                                 <th>Phone Number</th>
                                 <th>Reserved Seats</th>
                                 <th>Remaining Amount</th>
+                                <th>Reserved By</th>
                                 <th>Created At</th>
                                 <?php if ($userRole === 'Controller'): ?>
                                     <th>Actions</th>
@@ -2102,7 +2227,7 @@ for ($i = 1; $i <= 11; $i++):
                         </thead>
                         <tbody>
                             <?php foreach ($approvedReservations as $reservation): ?>
-                                <tr>
+                                <tr class="<?php echo isset($reservation['received_ticket']) && $reservation['received_ticket'] == 1 ? 'ticket-received' : ''; ?>">
                                     <td><strong>#<?php echo htmlspecialchars($reservation['id']); ?></strong></td>
                                     <td><?php echo htmlspecialchars($reservation['customer_name']); ?></td>
                                     <td><?php echo htmlspecialchars($reservation['phone_number']); ?></td>
@@ -2125,11 +2250,14 @@ for ($i = 1; $i <= 11; $i++):
                                             <?php endif; ?>
                                         </span>
                                     </td>
+                                    <td>
+                                        <?php echo !empty($reservation['reserved_by']) ? htmlspecialchars($reservation['reserved_by']) : '<em>N/A</em>'; ?>
+                                    </td>
                                     <td><?php echo date('M d, Y H:i', strtotime($reservation['created_at'])); ?></td>
                                     <?php if ($userRole === 'Controller'): ?>
                                         <td>
                                             <div class="action-buttons">
-                                                <button class="btn-edit" onclick='openEditModal(<?php echo json_encode($reservation); ?>)'>Edit</button>
+                                                <button class="btn-edit" onclick="openEditModal(<?php echo htmlspecialchars(json_encode($reservation), ENT_QUOTES, 'UTF-8'); ?>)">Edit</button>
                                                 <button class="btn-delete" onclick="confirmDelete(<?php echo $reservation['id']; ?>)">Delete</button>
                                             </div>
                                         </td>
@@ -2198,9 +2326,16 @@ for ($i = 1; $i <= 11; $i++):
 </div>
 
 <div class="checkbox-group">
-    <input type="checkbox" id="promotionCheckbox" name="promotion" value="1">
-    <label for="promotionCheckbox">🎟️ Used Promotion (10% Discount)</label>
+    <input type="checkbox" id="receivedTicketCheckbox" name="received_ticket" value="1">
+    <label for="receivedTicketCheckbox">Received Ticket</label>
 </div>
+
+<div class="checkbox-group khedma-checkbox-group">
+    <input type="checkbox" id="khedmaCheckbox" name="khedma" value="1" onchange="updateNewPriceInfo()">
+    <label for="khedmaCheckbox">Khedma (80 EGP / ticket)</label>
+</div>
+
+<div class="khedma-price-info" id="newPriceInfo" style="display:none;"></div>
 
                 <div class="form-group remaining-input" id="remainingGroup">
                     <label for="remaining">Remaining Amount (EGP) *</label>
@@ -2258,9 +2393,16 @@ for ($i = 1; $i <= 11; $i++):
 </div>
 
 <div class="checkbox-group">
-    <input type="checkbox" id="edit_promotion" name="promotion" value="1">
-    <label for="edit_promotion">🎟️ Used Promotion (10% Discount)</label>
+    <input type="checkbox" id="edit_received_ticket" name="received_ticket" value="1">
+    <label for="edit_received_ticket">Received Ticket</label>
 </div>
+
+<div class="checkbox-group khedma-checkbox-group">
+    <input type="checkbox" id="edit_khedmaCheckbox" name="khedma" value="1" onchange="updateEditPriceInfo()">
+    <label for="edit_khedmaCheckbox">Khedma (80 EGP / ticket)</label>
+</div>
+
+<div class="khedma-price-info" id="editPriceInfo" style="display:none;"></div>
 
 <button type="submit" class="submit-btn">Update Reservation</button>
             </form>
@@ -2349,7 +2491,7 @@ for ($i = 1; $i <= 11; $i++):
 
     function openReservationModal() {
         if (selectedSeats.length === 0) return;
-        
+
         const modal = document.getElementById('reservationModal');
         const selectedSeatsList = document.getElementById('selectedSeatsList');
         const selectedSeatsInput = document.getElementById('selectedSeatsInput');
@@ -2360,9 +2502,12 @@ for ($i = 1; $i <= 11; $i++):
             tag.textContent = seat;
             selectedSeatsList.appendChild(tag);
         });
-
         selectedSeatsInput.value = selectedSeats.join(', ');
-        
+
+        // Reset khedma state each time modal opens
+        document.getElementById('khedmaCheckbox').checked = false;
+        document.getElementById('newPriceInfo').style.display = 'none';
+
         modal.classList.add('active');
     }
 
@@ -2372,34 +2517,92 @@ for ($i = 1; $i <= 11; $i++):
     }
 
     function toggleRemainingInput() {
-        const checkbox = document.getElementById('unpaidCheckbox');
+        const checkbox   = document.getElementById('unpaidCheckbox');
         const remainingGroup = document.getElementById('remainingGroup');
         const remainingInput = document.getElementById('remaining');
-        const isPaidInput = document.getElementById('isPaidInput');
-        
+        const isPaidInput    = document.getElementById('isPaidInput');
+        const isKhedma       = document.getElementById('khedmaCheckbox').checked;
+        const pricePerSeat   = isKhedma ? 80 : 100;
+
         if (checkbox.checked) {
             remainingGroup.classList.add('visible');
             remainingInput.required = true;
             isPaidInput.value = '0';
+            // Auto-fill remaining based on khedma price
+            if (selectedSeats.length > 0) {
+                remainingInput.value = (selectedSeats.length * pricePerSeat).toFixed(2);
+            }
         } else {
             remainingGroup.classList.remove('visible');
             remainingInput.required = false;
             remainingInput.value = '0';
             isPaidInput.value = '1';
         }
+        updateNewPriceInfo();
+    }
+
+    function updateNewPriceInfo() {
+        const isKhedma     = document.getElementById('khedmaCheckbox').checked;
+        const isUnpaid     = document.getElementById('unpaidCheckbox').checked;
+        const infoBox      = document.getElementById('newPriceInfo');
+        const remainingInput = document.getElementById('remaining');
+        const pricePerSeat = isKhedma ? 80 : 100;
+        const seatCount    = selectedSeats.length;
+
+        if (!isKhedma) {
+            infoBox.style.display = 'none';
+            return;
+        }
+
+        const total = seatCount * pricePerSeat;
+        infoBox.style.display = 'block';
+        infoBox.innerHTML = `🎁 <strong>Khedma Price:</strong> ${pricePerSeat} EGP × ${seatCount} seat${seatCount !== 1 ? 's' : ''} = <strong>EGP ${total.toFixed(2)}</strong>`;
+
+        // Also auto-fill remaining if unpaid is checked
+        if (isUnpaid && seatCount > 0) {
+            remainingInput.value = total.toFixed(2);
+        }
+    }
+
+    function updateEditPriceInfo() {
+        const isKhedma     = document.getElementById('edit_khedmaCheckbox').checked;
+        const infoBox      = document.getElementById('editPriceInfo');
+        const seatsText    = document.getElementById('edit_reserved_desks').value;
+        const remainingInput = document.getElementById('edit_remaining');
+
+        const seatCount = seatsText.split(',').map(s => s.trim()).filter(s => s.length > 0).length;
+        const pricePerSeat = isKhedma ? 80 : 100;
+
+        if (!isKhedma) {
+            infoBox.style.display = 'none';
+            return;
+        }
+
+        const total = seatCount * pricePerSeat;
+        infoBox.style.display = 'block';
+        infoBox.innerHTML = `🎁 <strong>Khedma Price:</strong> ${pricePerSeat} EGP × ${seatCount} seat${seatCount !== 1 ? 's' : ''} = <strong>EGP ${total.toFixed(2)}</strong>`;
+        // Auto-fill remaining with khedma total
+        if (seatCount > 0) {
+            remainingInput.value = total.toFixed(2);
+        }
     }
 
     <?php if ($userRole === 'Controller'): ?>
     function openEditModal(reservation) {
-    document.getElementById('editId').value = reservation.id;
-    document.getElementById('edit_customer_name').value = reservation.customer_name;
-    document.getElementById('edit_phone_number').value = reservation.phone_number;
-    document.getElementById('edit_reserved_desks').value = reservation.reserved_desks;
-    document.getElementById('edit_remaining').value = reservation.remaining;
-    document.getElementById('edit_promotion').checked = reservation.promotion == 1;
-    
-    document.getElementById('editModal').classList.add('active');
-}
+        document.getElementById('editId').value = reservation.id;
+        document.getElementById('edit_customer_name').value = reservation.customer_name;
+        document.getElementById('edit_phone_number').value = reservation.phone_number;
+        document.getElementById('edit_reserved_desks').value = reservation.reserved_desks;
+        document.getElementById('edit_remaining').value = reservation.remaining;
+        document.getElementById('edit_received_ticket').checked = reservation.received_ticket == 1;
+
+        // Pre-populate khedma state from saved reservation
+        const khedmaBox = document.getElementById('edit_khedmaCheckbox');
+        khedmaBox.checked = reservation.khedma == 1;
+        updateEditPriceInfo(); // refresh price info panel immediately
+
+        document.getElementById('editModal').classList.add('active');
+    }
 
     function closeEditModal() {
         document.getElementById('editModal').classList.remove('active');
@@ -2455,4 +2658,5 @@ for ($i = 1; $i <= 11; $i++):
     });
 </script>
 </body>
-</html>
+</html>>y>
+</html>>

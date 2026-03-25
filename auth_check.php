@@ -2,10 +2,15 @@
 session_start();
 require_once 'db.php';
 
+$controllerName = '';
+
 if (isset($_SESSION['user_email']) && isset($_SESSION['user_role'])) {
 
     $userEmail = $_SESSION['user_email'];
     $userRole = $_SESSION['user_role'];
+    if (isset($_SESSION['controller_name'])) {
+        $controllerName = $_SESSION['controller_name'];
+    }
 } 
 elseif (isset($_COOKIE['user_email']) && isset($_COOKIE['user_token'])) {
     $email = $_COOKIE['user_email'];
@@ -21,6 +26,10 @@ elseif (isset($_COOKIE['user_email']) && isset($_COOKIE['user_token'])) {
             $_SESSION['user_role'] = $user['role'];
             $userEmail = $user['email'];
             $userRole = $user['role'];
+            if (isset($_COOKIE['controller_name'])) {
+                $_SESSION['controller_name'] = $_COOKIE['controller_name'];
+                $controllerName = $_COOKIE['controller_name'];
+            }
         } else {
             header("Location: login.php");
             exit;
