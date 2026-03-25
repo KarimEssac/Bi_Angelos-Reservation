@@ -245,10 +245,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php endif; ?>
         
         <form method="POST" action="">
-            <div class="form-group">
+            <div class="form-group" id="emailGroup">
                 <label for="email">Email Address</label>
                 <input type="email" id="email" name="email" required autofocus 
-                       placeholder="....">
+                       placeholder="...." value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>">
             </div>
             
             <div class="form-group" id="controllerNameGroup" style="display: none;">
@@ -297,8 +297,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             .then(data => {
                 if (data.role === 'Controller') {
                     controllerGroup.style.display = 'block';
+                    document.getElementById('emailGroup').style.display = 'none';
                 } else {
                     controllerGroup.style.display = 'none';
+                    document.getElementById('emailGroup').style.display = 'block';
                     document.querySelectorAll('input[name="controller_name"]').forEach(r => r.checked = false);
                 }
             })
@@ -323,6 +325,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php if (!empty($error) && strpos($error, 'Controller Name') !== false): ?>
         // Server indicated this is a Controller that still needs to pick a name
         controllerGroup.style.display = 'block';
+        document.getElementById('emailGroup').style.display = 'none';
         <?php endif; ?>
     </script>
 </body>
