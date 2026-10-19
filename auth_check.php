@@ -1,47 +1,15 @@
 <?php
-session_start();
-require_once 'db.php';
+require_once __DIR__ . '/auth.php';
 
-$controllerName = '';
-
-if (isset($_SESSION['user_email']) && isset($_SESSION['user_role'])) {
-
-    $userEmail = $_SESSION['user_email'];
-    $userRole = $_SESSION['user_role'];
-    if (isset($_SESSION['controller_name'])) {
-        $controllerName = $_SESSION['controller_name'];
-    }
-} 
-elseif (isset($_COOKIE['user_email']) && isset($_COOKIE['user_token'])) {
-    $email = $_COOKIE['user_email'];
-    $token = $_COOKIE['user_token'];
-    $hashedToken = hash('sha256', $email . 'bi_angelos_secret_salt');
-    if ($token === $hashedToken) {
-        $stmt = $pdo->prepare("SELECT email, role FROM accounts WHERE email = ?");
-        $stmt->execute([$email]);
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        if ($user) {
-            $_SESSION['user_email'] = $user['email'];
-            $_SESSION['user_role'] = $user['role'];
-            $userEmail = $user['email'];
-            $userRole = $user['role'];
-            if (isset($_COOKIE['controller_name'])) {
-                $_SESSION['controller_name'] = $_COOKIE['controller_name'];
-                $controllerName = $_COOKIE['controller_name'];
-            }
-        } else {
-            header("Location: login.php");
-            exit;
-        }
-    } else {
-        header("Location: login.php");
+$admin = currentAdmin($pdo);
+if (!$admin) {
+    if (wantsJsonResponse()) {
+        http_response_code(401);
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store');
+        echo json_encode(['authenticated' => false, 'error' => 'Please sign in again.']);
         exit;
     }
-} 
-else {
-    header("Location: login.php");
+    header('Location: login.php');
     exit;
 }
-
-?>

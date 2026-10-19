@@ -1,60 +1,21 @@
 <?php
-session_start();
-require_once 'db.php';
-
-if (isset($_COOKIE['user_email']) && isset($_COOKIE['user_token'])) {
-    $email = $_COOKIE['user_email'];
-    $token = $_COOKIE['user_token'];
-    $hashedToken = hash('sha256', $email . 'bi_angelos_secret_salt');
-    if ($token === $hashedToken) {
-        $stmt = $pdo->prepare("SELECT email, role FROM accounts WHERE email = ?");
-        $stmt->execute([$email]);
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        if ($user) {
-            $_SESSION['user_email'] = $user['email'];
-            $_SESSION['user_role'] = $user['role'];
-            header("Location: index.php");
-            exit;
-        }
-    }
+require_once __DIR__ . '/auth.php';
+if (currentAdmin($pdo)) {
+    header('Location: index.php');
+    exit;
 }
-
 $error = '';
+$email = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $email = trim($_POST['email']);
-    
-    if (empty($email)) {
-        $error = 'Please enter your email address';
+    $email = is_string($_POST['email'] ?? null) ? trim($_POST['email']) : '';
+    $password = is_string($_POST['password'] ?? null) ? $_POST['password'] : '';
+    if ($email === '' || $password === '') {
+        $error = 'Enter your email address and password.';
+    } elseif (loginAdmin($pdo, $email, $password)) {
+        header('Location: index.php');
+        exit;
     } else {
-        $stmt = $pdo->prepare("SELECT email, role FROM accounts WHERE email = ?");
-        $stmt->execute([$email]);
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        if ($user) {
-            $controllerName = isset($_POST['controller_name']) ? $_POST['controller_name'] : '';
-            if ($user['role'] === 'Controller' && empty($controllerName)) {
-                $error = 'Please select who you are (Controller Name).';
-            } else {
-                $_SESSION['user_email'] = $user['email'];
-                $_SESSION['user_role'] = $user['role'];
-                if ($user['role'] === 'Controller') {
-                    $_SESSION['controller_name'] = $controllerName;
-                }
-                
-                $token = hash('sha256', $email . 'bi_angelos_secret_salt');
-                setcookie('user_email', $email, time() + (30 * 24 * 60 * 60), '/', '', false, true);
-                setcookie('user_token', $token, time() + (30 * 24 * 60 * 60), '/', '', false, true);
-                if ($user['role'] === 'Controller') {
-                    setcookie('controller_name', $controllerName, time() + (30 * 24 * 60 * 60), '/', '', false, true);
-                }
-                
-                header("Location: index.php");
-                exit;
-            }
-        } else {
-            $error = 'Invalid email address.';
-        }
+        $error = 'Invalid email address or password.';
     }
 }
 ?>
@@ -63,7 +24,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Bi Angelos Theatre</title>
+    <title>Login - ثورة الموتى - Bi Angelos Theatre</title>
+    <link rel="icon" type="image/jpeg" href="logo.jpg">
     <style>
         * {
             margin: 0;
@@ -151,7 +113,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-size: 15px;
         }
         
-        .form-group input[type="email"] {
+        .form-group input[type="email"],
+        .form-group input[type="password"] {
             width: 100%;
             padding: 15px;
             border: 2px solid #A1CAE3;
@@ -238,8 +201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <img src="logo.jpg" alt="Bi Angelos Theatre" class="logo">
         
         <?php if ($error): ?>
-            <?php $isInfoError = strpos($error, 'Controller Name') !== false; ?>
-            <div class="<?php echo $isInfoError ? 'info-message' : 'error-message'; ?>">
+            <div class="error-message" role="alert">
                 <?php echo htmlspecialchars($error); ?>
             </div>
         <?php endif; ?>
@@ -248,85 +210,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="form-group" id="emailGroup">
                 <label for="email">Email Address</label>
                 <input type="email" id="email" name="email" required autofocus 
-                       placeholder="...." value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>">
+                       autocomplete="username" value="<?php echo htmlspecialchars($email, ENT_QUOTES, 'UTF-8'); ?>">
             </div>
             
-            <div class="form-group" id="controllerNameGroup" style="display: none;">
-                <label>Who are you? (Controllers only)</label>
-                <div style="display: flex; gap: 15px; margin-top: 10px; flex-wrap: wrap;">
-                    <label style="font-weight: normal; cursor: pointer;"><input type="radio" name="controller_name" value="Tota"> Tota</label>
-                    <label style="font-weight: normal; cursor: pointer;"><input type="radio" name="controller_name" value="Karim"> Karim</label>
-                    <label style="font-weight: normal; cursor: pointer;"><input type="radio" name="controller_name" value="Jolie"> Jolie</label>
-                    <label style="font-weight: normal; cursor: pointer;"><input type="radio" name="controller_name" value="Yousif"> Yousif</label>
-                </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" autocomplete="current-password" required>
             </div>
-            
+
             <button type="submit" class="login-btn">Login</button>
         </form>
         
     </div>
     
-    <script>
-        const emailInput = document.getElementById('email');
-        const controllerGroup = document.getElementById('controllerNameGroup');
-        let checkTimeout = null;
-        let clickingInGroup = false;
 
-        // Prevent blur from hiding the group when user clicks a radio button
-        controllerGroup.addEventListener('mousedown', function() {
-            clickingInGroup = true;
-        });
-        controllerGroup.addEventListener('mouseup', function() {
-            clickingInGroup = false;
-        });
-
-        function checkRole(email) {
-            if (!email) {
-                controllerGroup.style.display = 'none';
-                return;
-            }
-
-            const formData = new FormData();
-            formData.append('email', email);
-
-            fetch('check_role.php', {
-                method: 'POST',
-                body: formData
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.role === 'Controller') {
-                    controllerGroup.style.display = 'block';
-                    document.getElementById('emailGroup').style.display = 'none';
-                } else {
-                    controllerGroup.style.display = 'none';
-                    document.getElementById('emailGroup').style.display = 'block';
-                    document.querySelectorAll('input[name="controller_name"]').forEach(r => r.checked = false);
-                }
-            })
-            .catch(() => {
-                controllerGroup.style.display = 'none';
-            });
-        }
-
-        // Check on input with debounce
-        emailInput.addEventListener('input', function() {
-            clearTimeout(checkTimeout);
-            checkTimeout = setTimeout(() => checkRole(this.value.trim()), 400);
-        });
-
-        // Check on blur, but skip if the user is clicking within the controller group
-        emailInput.addEventListener('blur', function() {
-            if (clickingInGroup) return;
-            clearTimeout(checkTimeout);
-            checkRole(this.value.trim());
-        });
-
-        <?php if (!empty($error) && strpos($error, 'Controller Name') !== false): ?>
-        // Server indicated this is a Controller that still needs to pick a name
-        controllerGroup.style.display = 'block';
-        document.getElementById('emailGroup').style.display = 'none';
-        <?php endif; ?>
-    </script>
+    <script src="app.js?v=<?php echo filemtime(__DIR__ . '/app.js'); ?>"></script>
 </body>
 </html>

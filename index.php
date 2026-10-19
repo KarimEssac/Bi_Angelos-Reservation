@@ -1,220 +1,98 @@
 <?php
-require_once 'auth_check.php';
-require_once 'db.php';
-
-try {
-    $tables = ['reservations_2april'];
-    foreach ($tables as $table) {
-        $stmt = $pdo->prepare("DELETE FROM $table WHERE remaining > 0 AND created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)");
-        $stmt->execute();
-    }
-} catch(PDOException $e) {
-    error_log("Auto-cleanup failed: " . $e->getMessage());
-}
+require_once __DIR__ . '/auth_check.php';
+require_once __DIR__ . '/reservations.php';
 
 if (isset($_GET['logout'])) {
-    session_destroy();
-    setcookie('user_email', '', time() - 3600, '/');
-    setcookie('user_token', '', time() - 3600, '/');
-    header("Location: login.php");
+    logoutAdmin($pdo);
+    header('Location: login.php');
     exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'approve' && $userRole === 'Controller') {
-    $id = intval($_POST['id']);
-    $day = $_POST['day'];
-    $tableName = 'reservations_' . $day;
-
-    try {
-        $stmt = $pdo->prepare("UPDATE $tableName SET pending = 0, reserved_by = ? WHERE id = ?");
-        $stmt->execute([$controllerName, $id]);
-
-        header("Location: ?day=$day&tab=reservations&approved=1");
-        exit;
-    } catch(PDOException $e) {
-        $error = "Approve failed: " . $e->getMessage();
-    }
+$isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
+$jsonRequest = $isPost && wantsJsonResponse();
+if ($jsonRequest) {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
 }
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'reject' && $userRole === 'Controller') {
-    $id = intval($_POST['id']);
-    $day = $_POST['day'];
-    $tableName = 'reservations_' . $day;
-    
-    try {
-        $stmt = $pdo->prepare("DELETE FROM $tableName WHERE id = ?");
-        $stmt->execute([$id]);
-        
-        header("Location: ?day=$day&tab=reservations&rejected=1");
-        exit;
-    } catch(PDOException $e) {
-        $error = "Reject failed: " . $e->getMessage();
-    }
+$selectedDay = $isPost ? ($_POST['day'] ?? null) : ($_GET['day'] ?? '2026-11-06');
+if (!is_string($selectedDay) || !isset(PERFORMANCE_DATES[$selectedDay])
+    || ($isPost && isset($_GET['day']) && $_GET['day'] !== $selectedDay)) {
+    http_response_code(400);
+    exit($jsonRequest ? json_encode(['error' => 'Choose Friday 6/11 or Saturday 7/11, 2026.']) : 'Choose Friday 6/11 or Saturday 7/11, 2026.');
 }
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete' && $userRole === 'Controller') {
-    $id = intval($_POST['id']);
-    $day = $_POST['day'];
-    $tableName = 'reservations_' . $day;
-    
-    try {
-        $stmt = $pdo->prepare("DELETE FROM $tableName WHERE id = ?");
-        $stmt->execute([$id]);
-        
-        header("Location: ?day=$day&tab=reservations&deleted=1");
-        exit;
-    } catch(PDOException $e) {
-        $error = "Delete failed: " . $e->getMessage();
-    }
+$selectedArea = $_POST['area'] ?? $_GET['area'] ?? 'theatre';
+if (!is_string($selectedArea) || !isset(SEATING_AREAS[$selectedArea])
+    || ($isPost && isset($_GET['area']) && $_GET['area'] !== $selectedArea)) {
+    http_response_code(400);
+    exit($jsonRequest ? json_encode(['error' => 'Choose Main Theatre or Balcony.']) : 'Choose Main Theatre or Balcony.');
 }
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update' && $userRole === 'Controller') {
-    $id = intval($_POST['id']);
-    $day = $_POST['day'];
-    $customerName = trim($_POST['customer_name']);
-    $phoneNumber = trim($_POST['phone_number']);
-    $selectedSeats = $_POST['reserved_desks'];
-    $remaining = floatval($_POST['remaining']);
-    $receivedTicket = isset($_POST['received_ticket']) && $_POST['received_ticket'] === '1' ? 1 : 0;
-    $khedma = isset($_POST['khedma']) && $_POST['khedma'] === '1' ? 1 : 0;
-
-    $tableName = 'reservations_' . $day;
-
-    try {
-        $stmt = $pdo->prepare("UPDATE $tableName SET customer_name = ?, phone_number = ?, reserved_desks = ?, remaining = ?, received_ticket = ?, khedma = ? WHERE id = ?");
-        $stmt->execute([$customerName, $phoneNumber, $selectedSeats, $remaining, $receivedTicket, $khedma, $id]);
-
-        header("Location: ?day=$day&tab=reservations&updated=1");
-        exit;
-    } catch(PDOException $e) {
-        $error = "Update failed: " . $e->getMessage();
-    }
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'reserve') {
-    $day = $_POST['day'];
-    $customerName = trim($_POST['customer_name']);
-    $phoneNumber = trim($_POST['phone_number']);
-    $selectedSeats = $_POST['selected_seats'];
-    $isPaid = isset($_POST['is_paid']) && $_POST['is_paid'] === '1';
-    $remaining = $isPaid ? 0 : floatval($_POST['remaining']);
-    $comment = isset($_POST['comment']) ? trim($_POST['comment']) : '';
-    $receivedTicket = isset($_POST['received_ticket']) && $_POST['received_ticket'] === '1' ? 1 : 0;
-    $khedma = isset($_POST['khedma']) && $_POST['khedma'] === '1' ? 1 : 0;
-    $pending = ($userRole === 'Viewer') ? 1 : 0;
-    $tableName = 'reservations_' . $day;
-
-    try {
-        $stmt = $pdo->prepare("INSERT INTO $tableName (customer_name, phone_number, reserved_desks, remaining, pending, comment, received_ticket, reserved_by, khedma) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$customerName, $phoneNumber, $selectedSeats, $remaining, $pending, $comment, $receivedTicket, $controllerName, $khedma]);
-
-        header("Location: ?day=$day&tab=map&success=1");
-        exit;
-    } catch(PDOException $e) {
-        $error = "Reservation failed: " . $e->getMessage();
-    }
-}
-
-$selectedDay = '2april';
-$tableName = 'reservations_' . $selectedDay;
-$selectedTab = isset($_GET['tab']) ? $_GET['tab'] : 'map';
-
-if ($selectedTab === 'reservations' && $userRole === 'Viewer') {
+$selectedTab = $_GET['tab'] ?? 'map';
+if (!is_string($selectedTab) || !in_array($selectedTab, ['map', 'reservations'], true)) {
     $selectedTab = 'map';
 }
-$stmt = $pdo->query("SELECT * FROM $tableName ORDER BY created_at DESC");
-$allReservations = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$pendingReservations = array_filter($allReservations, function($res) {
-    return $res['pending'] == 1;
-});
-$approvedReservations = array_filter($allReservations, function($res) {
-    return $res['pending'] == 0;
-});
-
+$performanceId = performanceId($pdo, $selectedDay);
+expireUnpaidReservations($pdo);
+$error = '';
+if ($isPost) {
+    try {
+        $result = performReservationAction($pdo, $performanceId, (int) $admin['id'], $_POST);
+        $tab = $result === 'success' ? 'map' : 'reservations';
+        $redirect = '?day=' . $selectedDay . '&area=' . $selectedArea . '&tab=' . $tab . '&' . $result . '=1';
+        if ($jsonRequest) {
+            echo json_encode(['ok' => true, 'redirect' => $redirect]);
+            exit;
+        }
+        header('Location: ' . $redirect);
+        exit;
+    } catch (SeatConflictException $e) {
+        http_response_code(409);
+        $error = $e->getMessage();
+        if ($jsonRequest) {
+            echo json_encode(['error' => $error, 'unavailable_seats' => $e->seatCodes]);
+            exit;
+        }
+    } catch (InvalidArgumentException $e) {
+        http_response_code(400);
+        $error = $e->getMessage();
+        if ($jsonRequest) {
+            echo json_encode(['error' => $error]);
+            exit;
+        }
+    } catch (Throwable $e) {
+        http_response_code(500);
+        error_log('Reservation action failed: ' . $e->getMessage());
+        $error = 'Could not save the reservation. Please try again.';
+        if ($jsonRequest) {
+            echo json_encode(['error' => $error]);
+            exit;
+        }
+    }
+}
+$snapshot = reservationSnapshot($pdo, $performanceId);
+$allReservations = $snapshot['reservations'];
+$pendingReservations = array_filter($allReservations, fn($res) => $res['approval_status'] === 'pending');
+$approvedReservations = array_filter($allReservations, fn($res) => $res['approval_status'] === 'approved');
 $reservedSeats = [];
-$seatOwners = [];
 $pendingSeats = [];
 foreach ($allReservations as $reservation) {
-    $seats = explode(',', $reservation['reserved_desks']);
-    foreach ($seats as $seat) {
-        $seatTrimmed = trim($seat);
-        if ($reservation['pending'] == 1) {
-            $pendingSeats[] = $seatTrimmed;
+    foreach (explode(',', $reservation['seat_codes']) as $seat) {
+        if ($reservation['approval_status'] === 'pending') {
+            $pendingSeats[] = $seat;
         } else {
-            $reservedSeats[] = $seatTrimmed;
+            $reservedSeats[] = $seat;
         }
-        $seatOwners[$seatTrimmed] = [
-            'name' => $reservation['customer_name'],
-            'pending' => $reservation['pending']
-        ];
     }
 }
-
-$rightSide = [
-    'PR' => 11, 'OR' => 11, 'NR' => 10, 'MR' => 9, 'LR' => 11, 'KR' => 11,
-    'JR' => 11, 'IR' => 9, 'HR' => 11, 'GR' => 11, 'FR' => 11,
-    'ER' => 10, 'DR' => 9, 'CR' => 11, 'BR' => 11, 'AR' => 11
-];
-
-$leftSide = [
-    'PL' => 11, 'OL' => 11, 'NL' => 10, 'ML' => 9, 'LL' => 11, 'KL' => 11,
-    'JL' => 11, 'IL' => 10, 'HL' => 11, 'GL' => 11, 'FL' => 11,
-    'EL' => 10, 'DL' => 10, 'CL' => 11, 'BL' => 11, 'AL' => 11
-];
-
-function isSeatReserved($seat, $reservedSeats) {
-    return in_array($seat, $reservedSeats);
-}
-
-function isSeatPending($seat, $pendingSeats) {
-    return in_array($seat, $pendingSeats);
-}
-
-function isSoundControl($row, $seatNum) {
-    return (($row === 'PR' || $row === 'OR') && $seatNum >= 1 && $seatNum <= 3);
-}
-
-// Calculate Total Collected
-function calculateTotalCollected($reservations) {
-    $revenue100  = 0;
-    $count100    = 0;
-    $revenue80   = 0;
-    $count80     = 0;
-
-    foreach ($reservations as $reservation) {
-        $customerName = trim($reservation['customer_name']);
-        $seats        = explode(',', $reservation['reserved_desks']);
-        $seatCount    = count($seats);
-        $isKhedma     = !empty($reservation['khedma']) && $reservation['khedma'] == 1;
-
-        if ($customerName === 'Sponsors') {
-            continue;
-        }
-
-        if ($isKhedma) {
-            $revenue80 += $seatCount * 80;
-            $count80   += $seatCount;
-        } else {
-            $revenue100 += $seatCount * 100;
-            $count100   += $seatCount;
-        }
-    }
-
-    return [
-        'revenue_100'   => $revenue100,
-        'count_100'     => $count100,
-        'revenue_80'    => $revenue80,
-        'count_80'      => $count80,
-        'total_revenue' => $revenue100 + $revenue80
-    ];
-}
+$rightSide = theatreSides()['right'];
+$leftSide = theatreSides()['left'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bi Angelos Theatre - Seat Reservation</title>
+    <title>ثورة الموتى - Bi Angelos Theatre</title>
+    <link rel="icon" type="image/jpeg" href="logo.jpg">
     <style>
         * {
             margin: 0;
@@ -239,60 +117,19 @@ function calculateTotalCollected($reservations) {
             max-width: 1400px;
             position: relative;
         }
-        
-        .user-info {
+
+        .header-admin {
             position: absolute;
             top: 15px;
             right: 20px;
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-        
-        .user-badge {
-            background: linear-gradient(135deg, #207FBD 0%, #4a9ed1 100%);
-            color: white;
-            padding: 8px 16px;
+            padding: 8px 14px;
             border-radius: 20px;
+            background-color: #eaf4fa;
+            color: #207FBD;
             font-size: 13px;
             font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .user-badge::before {
-            font-size: 14px;
-        }
-        
-        .role-badge {
-            background: linear-gradient(135deg, #FC723E 0%, #ff8c5a 100%);
-            color: white;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 11px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .logout-btn {
-            background: linear-gradient(135deg, #f44336 0%, #e57373 100%);
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 13px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            text-decoration: none;
-            display: inline-block;
-        }
-        
-        .logout-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(244, 67, 54, 0.4);
+            max-width: calc(100% - 40px);
+            overflow-wrap: anywhere;
         }
         
         .logo {
@@ -322,122 +159,102 @@ function calculateTotalCollected($reservations) {
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
         }
         
-        .day-selector {
-            text-align: center;
-            margin-bottom: 20px;
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-        
-        .day-selector a {
-            display: inline-block;
-            padding: 12px 25px;
-            background-color: #A1CAE3;
-            color: #207FBD;
-            text-decoration: none;
-            border-radius: 8px;
-            font-weight: bold;
-            transition: all 0.3s;
-            font-size: clamp(14px, 3vw, 16px);
-            border: 2px solid transparent;
-        }
-        
-        .day-selector a.active {
-            background-color: #207FBD;
-            color: #FFFEFF;
-            border: 2px solid #FC723E;
-        }
-        
-        .day-selector a:hover {
-            background-color: #207FBD;
-            color: #FFFEFF;
-            transform: translateY(-2px);
-        }
-
-        /* Tab Navigation */
-        .tab-navigation {
-            display: flex;
-            gap: 15px;
-            justify-content: center;
-            margin-bottom: 30px;
-            flex-wrap: wrap;
-            padding: 10px;
-            background: linear-gradient(135deg, rgba(161, 202, 227, 0.3) 0%, rgba(255, 254, 255, 0.5) 100%);
-            border-radius: 15px;
-            box-shadow: 0 4px 15px rgba(32, 127, 189, 0.15);
-        }
-
-        .tab-button {
-            padding: 15px 40px;
-            background: linear-gradient(135deg, #A1CAE3 0%, #FFFEFF 100%);
-            color: #207FBD;
-            text-decoration: none;
+        .booking-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1.15fr;
+            gap: 22px;
+            align-items: end;
+            padding: 18px 20px;
+            margin-bottom: 24px;
+            background: #f8fbfd;
+            border: 1px solid #dce7ef;
             border-radius: 12px;
-            font-weight: bold;
-            transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-            font-size: clamp(14px, 3vw, 17px);
-            border: 3px solid #A1CAE3;
-            cursor: pointer;
-            position: relative;
-            overflow: hidden;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            box-shadow: 0 4px 10px rgba(32, 127, 189, 0.2);
         }
 
-        .tab-button::before {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 0;
-            height: 0;
-            border-radius: 50%;
-            background: rgba(252, 114, 62, 0.3);
-            transform: translate(-50%, -50%);
-            transition: width 0.6s, height 0.6s;
+        .control-field { min-width: 0; }
+        .control-field + .control-field {
+            padding-left: 22px;
+            border-left: 1px solid #dce7ef;
+        }
+        .control-label {
+            display: block;
+            margin-bottom: 9px;
+            color: #536a7b;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
         }
 
-        .tab-button:hover::before {
-            width: 300px;
-            height: 300px;
+        .day-selector {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+            padding: 4px;
+            background: #eaf1f6;
+            border-radius: 9px;
         }
-
-        .tab-button span {
-            position: relative;
-            z-index: 1;
-        }
-
-        .tab-button.active {
-            background: linear-gradient(135deg, #FC723E 0%, #ff8c5a 100%);
-            color: #FFFEFF;
-            border: 3px solid #207FBD;
-            transform: scale(1.05);
-            box-shadow: 0 8px 25px rgba(252, 114, 62, 0.4);
-        }
-
-        .tab-button.active::after {
-            content: '✓';
-            position: absolute;
-            top: -5px;
-            right: -5px;
-            background: #207FBD;
-            color: white;
-            width: 25px;
-            height: 25px;
-            border-radius: 50%;
+        .day-selector a {
             display: flex;
             align-items: center;
             justify-content: center;
+            min-height: 40px;
+            padding: 8px 10px;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            color: #536a7b;
             font-size: 14px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            font-weight: 600;
+            line-height: 1.3;
+            text-align: center;
+            text-decoration: none;
+            transition: background-color 0.15s, color 0.15s;
+        }
+        .day-selector a.active {
+            background: #207FBD;
+            color: white;
+            border-color: #207FBD;
+        }
+        .day-selector a:not(.active):hover { background: #dce9f2; color: #185f8e; }
+        .booking-controls a:focus-visible { outline: 3px solid #FC723E; outline-offset: 3px; }
+
+        .tab-navigation {
+            display: grid;
+            grid-template-columns: 1fr 1.4fr;
+            gap: 12px;
+            min-height: 48px;
+            border-bottom: 1px solid #cddde8;
+        }
+        .tab-button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 3px;
+            border-bottom: 3px solid transparent;
+            color: #536a7b;
+            font-size: 14px;
+            font-weight: 600;
+            text-align: center;
+            text-decoration: none;
+            line-height: 1.3;
+            transition: color 0.15s, border-color 0.15s;
+        }
+        .tab-button.active { color: #207FBD; border-bottom-color: #207FBD; }
+        .tab-button:hover { color: #185f8e; border-bottom-color: #A1CAE3; }
+
+        @media (max-width: 1000px) {
+            .booking-controls { grid-template-columns: 1fr 1fr; gap: 16px 20px; }
+            .control-view { grid-column: 1 / -1; }
+            .control-field.control-view { padding: 14px 0 0; border-left: 0; border-top: 1px solid #dce7ef; }
+        }
+        @media (max-width: 560px) {
+            .booking-controls { grid-template-columns: 1fr; padding: 15px; gap: 16px; }
+            .control-field + .control-field { padding-left: 0; border-left: 0; }
+            .control-label { margin-bottom: 7px; }
         }
 
-        .tab-button:hover {
-            transform: translateY(-3px) scale(1.02);
-            box-shadow: 0 8px 20px rgba(252, 114, 62, 0.3);
+        .error-message {
+            background: #ffebee; color: #b71c1c; padding: 15px;
+            border: 1px solid #ef9a9a; border-radius: 8px; margin-bottom: 20px;
         }
 
         /* Tab Content */
@@ -931,7 +748,8 @@ function calculateTotalCollected($reservations) {
             overflow-x: auto;
             overflow-y: hidden;
             -webkit-overflow-scrolling: touch;
-            margin-bottom: 20px;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
             scrollbar-width: thin;
             scrollbar-color: #207FBD #A1CAE3;
         }
@@ -958,6 +776,7 @@ function calculateTotalCollected($reservations) {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 30px;
+            row-gap: 20px;
             min-width: 1200px;
             max-width: 1050px; 
             margin: 0 auto;
@@ -1082,11 +901,11 @@ function calculateTotalCollected($reservations) {
         }
         
         .stage {
+            grid-column: 1 / -1;
             background: linear-gradient(135deg, #8B4513 0%, #654321 100%);
             color: #FFFEFF;
             text-align: center;
             padding: 20px 15px;
-            margin-bottom: 20px;
             font-size: clamp(20px, 5vw, 32px);
             font-weight: bold;
             border-radius: 10px;
@@ -1678,12 +1497,14 @@ function calculateTotalCollected($reservations) {
 
 .khedma-price-info {
     margin-bottom: 18px;
-    padding: 12px 16px;
+    padding: 10px 12px;
     background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
     border: 2px solid #4CAF50;
     border-radius: 10px;
     color: #1b5e20;
-    font-size: 15px;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-line;
     animation: slideDown 0.3s ease;
 }
 
@@ -1701,13 +1522,17 @@ function calculateTotalCollected($reservations) {
 }
 
         @media (max-width: 767px) {
-            .user-info {
-                position: static;
-                justify-content: center;
-                margin-top: 10px;
-                flex-wrap: wrap;
+            .header {
+                padding-top: 52px;
             }
-            
+
+            .header-admin {
+                top: 10px;
+                right: 10px;
+                font-size: 12px;
+                padding: 6px 10px;
+            }
+
             .reservations-table {
                 font-size: 12px;
             }
@@ -1767,33 +1592,102 @@ function calculateTotalCollected($reservations) {
                 flex-direction: column;
             }
         }
+
+        .reservation-scope { text-align: center; color: #546778; margin-bottom: 18px; }
+        .modal-location { color: #546778; margin-top: 8px; }
+        .balcony-scroll-container { overflow-x: auto; }
+        .balcony-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 180px minmax(0, 1fr);
+            gap: 20px;
+            min-width: 1280px;
+            max-width: 1280px;
+            margin: 0 auto;
+        }
+        .balcony-layout .row { height: 30px; margin-bottom: 6px; }
+        .balcony-layout .seat { flex-shrink: 0; }
+        .balcony-right .row { justify-content: flex-end; }
+        .balcony-right .seats { flex-direction: row-reverse; }
+        .balcony-right .row-label { margin-right: 0; margin-left: 8px; }
+        .balcony-center { display: flex; flex-direction: column; align-items: center; }
+        .balcony-control-room, .balcony-exit {
+            background: #79502f;
+            color: white;
+            border-radius: 8px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .balcony-control-room {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 96px;
+            margin-bottom: 12px;
+        }
+        .balcony-exit { padding: 12px 20px; margin-top: 24px; }
+        [hidden] { display: none !important; }
+        .live-notice { padding: 14px; margin-bottom: 16px; border: 1px solid #A1CAE3; border-radius: 8px; color: #185e8b; background: #edf7fd; line-height: 1.5; }
+        .availability-notice { text-align: center; padding: 15px 0; }
+        .availability-icon { color: #207FBD; font-size: 56px; margin-bottom: 15px; }
+        .availability-notice h2 { color: #207FBD; margin-bottom: 15px; font-size: 24px; }
+        .availability-notice p { color: #445566; line-height: 1.7; margin-bottom: 25px; }
+        .submit-btn:disabled { opacity: 0.6; cursor: wait; }
     </style>
 </head>
 <body>
     <div class="header">
+        <span class="header-admin" aria-label="Signed-in admin"><?php echo htmlspecialchars($admin['name'], ENT_QUOTES, 'UTF-8'); ?></span>
         <img src="logo.jpg" alt="Bi Angelos Theatre" class="logo">
-        <h1>نظام حجز مسرحية درب الصليب</h1>
+        <h1 dir="rtl">نظام حجز مسرحية ثورة الموتى</h1>
         <p class="subtitle">إختار الكرسي اللي تحب تتفرج من عليه</p>
-        <div class="user-info">
-            <div class="user-badge">
-                <?php echo htmlspecialchars($userEmail); ?>
-                <?php if ($userRole === 'Controller' && !empty($controllerName)): ?>
-                    <span style="margin-left: 5px; color: #FFF;">(<?php echo htmlspecialchars($controllerName); ?>)</span>
-                <?php endif; ?>
-                <span class="role-badge"><?php echo htmlspecialchars($userRole); ?></span>
-            </div>
-            <a href="?logout=1" class="logout-btn" onclick="return confirm('Are you sure you want to logout?')">Logout</a>
-        </div>
     </div>
-    
+
     <div class="container">
+        <?php if ($error): ?>
+            <div class="error-message" role="alert"><?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?></div>
+        <?php endif; ?>
+
+        <div class="booking-controls">
+            <div class="control-field">
+                <span class="control-label" id="performanceDateLabel">Performance date</span>
+                <nav class="day-selector" aria-labelledby="performanceDateLabel">
+            <?php foreach (PERFORMANCE_DATES as $date => $label): ?>
+                <a href="?day=<?php echo $date; ?>&amp;area=<?php echo $selectedArea; ?>&amp;tab=<?php echo $selectedTab; ?>"
+                   class="<?php echo $selectedDay === $date ? 'active' : ''; ?>"
+                   <?php if ($selectedDay === $date): ?>aria-current="date"<?php endif; ?>><?php echo $label; ?></a>
+            <?php endforeach; ?>
+        </nav>
+            </div>
+            <div class="control-field">
+                <span class="control-label" id="seatingAreaLabel">Seating area</span>
+                <nav class="day-selector area-selector" aria-labelledby="seatingAreaLabel">
+            <?php foreach (SEATING_AREAS as $area => $label): ?>
+                <a href="?day=<?php echo $selectedDay; ?>&amp;area=<?php echo $area; ?>&amp;tab=<?php echo $selectedTab; ?>"
+                   data-area="<?php echo $area; ?>"
+                   class="<?php echo $selectedArea === $area ? 'active' : ''; ?>"
+                   <?php if ($selectedArea === $area): ?>aria-current="true"<?php endif; ?>><?php echo $label; ?></a>
+            <?php endforeach; ?>
+        </nav>
+            </div>
+            <div class="control-field control-view">
+                <span class="control-label" id="viewLabel">View</span>
+                <nav class="tab-navigation" aria-labelledby="viewLabel">
+    <a href="?day=<?php echo $selectedDay; ?>&amp;area=<?php echo $selectedArea; ?>&amp;tab=map" class="tab-button <?php echo $selectedTab === 'map' ? 'active' : ''; ?>" <?php if ($selectedTab === 'map'): ?>aria-current="page"<?php endif; ?>><span>Seat Map</span></a>
+
+        <a href="?day=<?php echo $selectedDay; ?>&amp;area=<?php echo $selectedArea; ?>&amp;tab=reservations" class="tab-button <?php echo $selectedTab === 'reservations' ? 'active' : ''; ?>" <?php if ($selectedTab === 'reservations'): ?>aria-current="page"<?php endif; ?>><span>Reservations Data</span></a>
+
+</nav>
+            </div>
+        </div>
+        <p id="liveNotice" class="live-notice" role="status" hidden></p>
+
+
         <?php if (isset($_GET['success'])): ?>
             <div class="success-message">
-                <?php if ($userRole === 'Viewer'): ?>
-                    Reservation submitted and pending approval!
-                <?php else: ?>
+
                     Reservation completed successfully!
-                <?php endif; ?>
+
             </div>
         <?php endif; ?>
 
@@ -1822,12 +1716,7 @@ function calculateTotalCollected($reservations) {
         <?php endif; ?>
 
 
-        <div class="tab-navigation">
-    <a href="?day=<?php echo $selectedDay; ?>&tab=map" class="tab-button <?php echo $selectedTab === 'map' ? 'active' : ''; ?>"><span>Seat Map</span></a>
-    <?php if ($userRole !== 'Viewer'): ?>
-        <a href="?day=<?php echo $selectedDay; ?>&tab=reservations" class="tab-button <?php echo $selectedTab === 'reservations' ? 'active' : ''; ?>"><span>Reservations Data</span></a>
-    <?php endif; ?>
-</div>
+
 
         <!-- Theatre Map Tab -->
         <div class="tab-content <?php echo $selectedTab === 'map' ? 'active' : ''; ?>">
@@ -1864,7 +1753,10 @@ function calculateTotalCollected($reservations) {
                 </div>
             </div>
             
-            <div class="theatre-scroll-container">
+            <div class="theatre-scroll-container balcony-scroll-container" data-map-area="balcony" <?php if ($selectedArea !== 'balcony'): ?>hidden<?php endif; ?>>
+                <?php require __DIR__ . '/balcony_map.php'; ?>
+            </div>
+            <div class="theatre-scroll-container" data-map-area="theatre" <?php if ($selectedArea !== 'theatre'): ?>hidden<?php endif; ?>>
                 <div class="theatre-layout">
                     <!-- Right Side -->
                     <div class="side">
@@ -1885,11 +1777,11 @@ for ($i = 1; $i <= 11; $i++):
     $ownerName = '';
     if ($isReserved || $isPending) {
         foreach ($allReservations as $reservation) {
-            $seats = explode(',', $reservation['reserved_desks']);
+            $seats = explode(',', $reservation['seat_codes']);
             foreach ($seats as $seat) {
                 if (trim($seat) === $seatId) {
-                    $hasRemaining = $reservation['remaining'] > 0;
-                    $ownerName = htmlspecialchars($reservation['customer_name']);
+                    $hasRemaining = $reservation['remaining_amount'] > 0;
+                    $ownerName = $reservation['customer_name'];
                     break 2;
                 }
             }
@@ -1907,6 +1799,8 @@ for ($i = 1; $i <= 11; $i++):
         $isBlocked = ($i < $startSeat) || ($i > ($startSeat + $seatCount - 1));
     }
     
+    $isBlocked = $isBlocked || isTheatreSeatBlocked($seatId);
+
     if ($isSC) {
         $class = 'sound-control';
         $title = 'Sound Control';
@@ -1920,29 +1814,29 @@ for ($i = 1; $i <= 11; $i++):
         $title = 'Pending Approval - Reserved by ' . $ownerName;
         $remaining = 0;
         foreach ($allReservations as $reservation) {
-            $seats = explode(',', $reservation['reserved_desks']);
+            $seats = explode(',', $reservation['seat_codes']);
             foreach ($seats as $seat) {
                 if (trim($seat) === $seatId) {
-                    $remaining = $reservation['remaining'];
+                    $remaining = $reservation['remaining_amount'];
                     break 2;
                 }
             }
         }
-        $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining', true)";
+        $onclick = 'showSeatInfo(' . json_encode($seatId) . ', ' . json_encode($ownerName) . ', ' . json_encode((float) $remaining) . ', true)';
     } elseif ($isReserved) {
         $class = $hasRemaining ? 'reserved-unpaid' : 'reserved';
         $title = 'Reserved by ' . $ownerName . ($hasRemaining ? ' (Unpaid)' : '');
         $remaining = 0;
         foreach ($allReservations as $reservation) {
-            $seats = explode(',', $reservation['reserved_desks']);
+            $seats = explode(',', $reservation['seat_codes']);
             foreach ($seats as $seat) {
                 if (trim($seat) === $seatId) {
-                    $remaining = $reservation['remaining'];
+                    $remaining = $reservation['remaining_amount'];
                     break 2;
                 }
             }
         }
-        $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining', false)";
+        $onclick = 'showSeatInfo(' . json_encode($seatId) . ', ' . json_encode($ownerName) . ', ' . json_encode((float) $remaining) . ', false)';
     } else {
         $class = 'available';
         $title = 'Available - Click to reserve';
@@ -1951,8 +1845,8 @@ for ($i = 1; $i <= 11; $i++):
 ?>
                                         <div class="seat <?php echo $class; ?>" 
                                              data-seat="<?php echo $seatId; ?>" 
-                                             title="<?php echo $title; ?>"
-                                             onclick="<?php echo $onclick; ?>">
+                                             title="<?php echo htmlspecialchars($title, ENT_QUOTES, 'UTF-8'); ?>"
+                                             onclick="<?php echo htmlspecialchars($onclick, ENT_QUOTES, 'UTF-8'); ?>">
                                             <?php echo $i; ?>
                                         </div>
                                     <?php endfor; ?>
@@ -1978,18 +1872,18 @@ for ($i = 1; $i <= 11; $i++):
     $ownerName = '';
     if ($isReserved || $isPending) {
         foreach ($allReservations as $reservation) {
-            $seats = explode(',', $reservation['reserved_desks']);
+            $seats = explode(',', $reservation['seat_codes']);
             foreach ($seats as $seat) {
                 if (trim($seat) === $seatId) {
-                    $hasRemaining = $reservation['remaining'] > 0;
-                    $ownerName = htmlspecialchars($reservation['customer_name']);
+                    $hasRemaining = $reservation['remaining_amount'] > 0;
+                    $ownerName = $reservation['customer_name'];
                     break 2;
                 }
             }
         }
     }
     
-    $isBlocked = $i > $seatCount;
+    $isBlocked = $i > $seatCount || isTheatreSeatBlocked($seatId);
     
     if ($isBlocked) {
         $class = 'blocked';
@@ -2000,29 +1894,29 @@ for ($i = 1; $i <= 11; $i++):
         $title = 'Pending Approval - Reserved by ' . $ownerName;
         $remaining = 0;
         foreach ($allReservations as $reservation) {
-            $seats = explode(',', $reservation['reserved_desks']);
+            $seats = explode(',', $reservation['seat_codes']);
             foreach ($seats as $seat) {
                 if (trim($seat) === $seatId) {
-                    $remaining = $reservation['remaining'];
+                    $remaining = $reservation['remaining_amount'];
                     break 2;
                 }
             }
         }
-        $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining', true)";
+        $onclick = 'showSeatInfo(' . json_encode($seatId) . ', ' . json_encode($ownerName) . ', ' . json_encode((float) $remaining) . ', true)';
     } elseif ($isReserved) {
         $class = $hasRemaining ? 'reserved-unpaid' : 'reserved';
         $title = 'Reserved by ' . $ownerName . ($hasRemaining ? ' (Unpaid)' : '');
         $remaining = 0;
         foreach ($allReservations as $reservation) {
-            $seats = explode(',', $reservation['reserved_desks']);
+            $seats = explode(',', $reservation['seat_codes']);
             foreach ($seats as $seat) {
                 if (trim($seat) === $seatId) {
-                    $remaining = $reservation['remaining'];
+                    $remaining = $reservation['remaining_amount'];
                     break 2;
                 }
             }
         }
-        $onclick = "showSeatInfo('$seatId', '$ownerName', '$remaining', false)";
+        $onclick = 'showSeatInfo(' . json_encode($seatId) . ', ' . json_encode($ownerName) . ', ' . json_encode((float) $remaining) . ', false)';
     } else {
         $class = 'available';
         $title = 'Available - Click to reserve';
@@ -2031,8 +1925,8 @@ for ($i = 1; $i <= 11; $i++):
 ?>
                                         <div class="seat <?php echo $class; ?>" 
                                              data-seat="<?php echo $seatId; ?>" 
-                                             title="<?php echo $title; ?>"
-                                             onclick="<?php echo $onclick; ?>">
+                                             title="<?php echo htmlspecialchars($title, ENT_QUOTES, 'UTF-8'); ?>"
+                                             onclick="<?php echo htmlspecialchars($onclick, ENT_QUOTES, 'UTF-8'); ?>">
                                             <?php echo $i; ?>
                                         </div>
                                     <?php endfor; ?>
@@ -2040,10 +1934,9 @@ for ($i = 1; $i <= 11; $i++):
                             </div>
                         <?php endforeach; ?>
                     </div>
+                    <div class="stage">STAGE</div>
                 </div>
             </div>
-            
-            <div class="stage">STAGE</div>
 
             <!-- Reservation Action Button -->
             <div class="reservation-action" id="reservationAction">
@@ -2055,223 +1948,8 @@ for ($i = 1; $i <= 11; $i++):
         </div>
 
         <!-- Reservations Data Tab -->
-        <div class="tab-content <?php echo $selectedTab === 'reservations' ? 'active' : ''; ?>">
-            <?php
-            $totalReservations = count($approvedReservations);
-            $totalSeatsReserved = count($reservedSeats);
-            $totalRemaining = array_sum(array_column($approvedReservations, 'remaining'));
-            $collectedData = calculateTotalCollected($approvedReservations);
-            ?>
-
-            <div class="stats-container">
-                <div class="stat-card">
-                    <div class="stat-number"><?php echo $totalReservations; ?></div>
-                    <div class="stat-label">Total Reservations</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number"><?php echo $totalSeatsReserved; ?></div>
-                    <div class="stat-label">Seats Reserved</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">EGP <?php echo number_format($totalRemaining, 2); ?></div>
-                    <div class="stat-label">Total Remaining</div>
-                </div>
-                <div class="stat-card revenue-card">
-                    <div class="stat-number">EGP <?php echo number_format($collectedData['total_revenue'], 2); ?></div>
-                    <div class="stat-label">Total Collected</div>
-                    <div class="revenue-breakdown">
-                        <?php if ($collectedData['count_100'] > 0): ?>
-                        <div>
-                            <span>100 EGP Tickets:</span>
-                            <strong><?php echo $collectedData['count_100']; ?> &times; 100 = EGP <?php echo number_format($collectedData['revenue_100'], 2); ?></strong>
-                        </div>
-                        <?php endif; ?>
-                        <?php if ($collectedData['count_80'] > 0): ?>
-                        <div>
-                            <span>Khedma (80 EGP):</span>
-                            <strong><?php echo $collectedData['count_80']; ?> &times; 80 = EGP <?php echo number_format($collectedData['revenue_80'], 2); ?></strong>
-                        </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-
-            <?php
-            // Per-collector breakdown
-            $controllerTotals = [];
-            foreach ($approvedReservations as $res) {
-                if (trim($res['customer_name']) === 'Sponsors') continue;
-                $by = !empty($res['reserved_by']) ? trim($res['reserved_by']) : 'Unknown';
-                $seats = explode(',', $res['reserved_desks']);
-                $count = count($seats);
-                $isKhedma = !empty($res['khedma']) && $res['khedma'] == 1;
-                $price = $isKhedma ? 80 : 100;
-                if (!isset($controllerTotals[$by])) $controllerTotals[$by] = ['count' => 0, 'total' => 0];
-                $controllerTotals[$by]['count'] += $count;
-                $controllerTotals[$by]['total'] += $count * $price;
-            }
-            arsort($controllerTotals); // sort by array value order; re-sort by total descending
-            uasort($controllerTotals, fn($a, $b) => $b['total'] <=> $a['total']);
-            if (!empty($controllerTotals)):
-            ?>
-            <div class="collector-card">
-                <div class="collector-card-title">
-                    &#128100; Collected by Controller
-                </div>
-                <div class="collector-grid">
-                    <?php foreach ($controllerTotals as $name => $data): ?>
-                    <div class="collector-row">
-                        <div class="collector-avatar"><?php echo htmlspecialchars(mb_strtoupper(mb_substr($name, 0, 1))); ?></div>
-                        <div class="collector-info">
-                            <div class="collector-name"><?php echo htmlspecialchars($name); ?></div>
-                            <div class="collector-seats"><?php echo $data['count']; ?> seat<?php echo $data['count'] != 1 ? 's' : ''; ?></div>
-                        </div>
-                        <div class="collector-total">EGP <?php echo number_format($data['total'], 2); ?></div>
-                    </div>
-                    <?php endforeach; ?>
-                </div>
-            </div>
-            <?php endif; ?>
-
-            <?php if ($userRole === 'Controller' && count($pendingReservations) > 0): ?>
-                <!-- Pending Reservations Section -->
-                <div class="pending-section">
-                    <h2>⏳ Pending Reservations Awaiting Approval</h2>
-                    <div class="reservations-container">
-                        <table class="reservations-table">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Customer Name</th>
-                                    <th>Phone Number</th>
-                                    <th>Reserved Seats</th>
-                                    <th>Remaining Amount</th>
-                                    <th>Comment</th>
-                                    <th>Created At</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($pendingReservations as $reservation): ?>
-                                    <tr class="<?php echo isset($reservation['received_ticket']) && $reservation['received_ticket'] == 1 ? 'ticket-received' : ''; ?>">
-                                        <td><strong>#<?php echo htmlspecialchars($reservation['id']); ?></strong></td>
-                                        <td><?php echo htmlspecialchars($reservation['customer_name']); ?></td>
-                                        <td><?php echo htmlspecialchars($reservation['phone_number']); ?></td>
-                                        <td>
-                                            <div class="seats-cell">
-                                                <?php 
-                                                $seats = explode(',', $reservation['reserved_desks']);
-                                                foreach ($seats as $seat): 
-                                                ?>
-                                                    <span class="seat-badge"><?php echo trim(htmlspecialchars($seat)); ?></span>
-                                                <?php endforeach; ?>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <span class="remaining-amount <?php echo $reservation['remaining'] == 0 ? 'remaining-paid' : ''; ?>">
-                                                <?php if ($reservation['remaining'] == 0): ?>
-                                                    Paid
-                                                <?php else: ?>
-                                                    EGP <?php echo number_format($reservation['remaining'], 2); ?>
-                                                <?php endif; ?>
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <div class="comment-cell">
-                                                <?php echo !empty($reservation['comment']) ? htmlspecialchars($reservation['comment']) : '<em>No comment</em>'; ?>
-                                            </div>
-                                        </td>
-                                        <td><?php echo date('M d, Y H:i', strtotime($reservation['created_at'])); ?></td>
-                                        <td>
-                                            <div class="action-buttons">
-                                                <form method="POST" action="" style="display: inline;">
-                                                    <input type="hidden" name="action" value="approve">
-                                                    <input type="hidden" name="day" value="<?php echo $selectedDay; ?>">
-                                                    <input type="hidden" name="id" value="<?php echo $reservation['id']; ?>">
-                                                    <button type="submit" class="btn-edit btn-approve" onclick="return confirm('Approve this reservation?')">Approve</button>
-                                                </form>
-                                                <form method="POST" action="" style="display: inline;">
-                                                    <input type="hidden" name="action" value="reject">
-                                                    <input type="hidden" name="day" value="<?php echo $selectedDay; ?>">
-                                                    <input type="hidden" name="id" value="<?php echo $reservation['id']; ?>">
-                                                    <button type="submit" class="btn-delete btn-reject" onclick="return confirm('Reject and delete this reservation?')">Reject</button>
-                                                </form>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            <?php endif; ?>
-
-            <!-- Approved Reservations Section -->
-
-            <div class="reservations-container">
-                <?php if ($totalReservations > 0): ?>
-                    <table class="reservations-table">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Customer Name</th>
-                                <th>Phone Number</th>
-                                <th>Reserved Seats</th>
-                                <th>Remaining Amount</th>
-                                <th>Reserved By</th>
-                                <th>Created At</th>
-                                <?php if ($userRole === 'Controller'): ?>
-                                    <th>Actions</th>
-                                <?php endif; ?>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($approvedReservations as $reservation): ?>
-                                <tr class="<?php echo isset($reservation['received_ticket']) && $reservation['received_ticket'] == 1 ? 'ticket-received' : ''; ?>">
-                                    <td><strong>#<?php echo htmlspecialchars($reservation['id']); ?></strong></td>
-                                    <td><?php echo htmlspecialchars($reservation['customer_name']); ?></td>
-                                    <td><?php echo htmlspecialchars($reservation['phone_number']); ?></td>
-                                    <td>
-                                        <div class="seats-cell">
-                                            <?php 
-                                            $seats = explode(',', $reservation['reserved_desks']);
-                                            foreach ($seats as $seat): 
-                                            ?>
-                                                <span class="seat-badge"><?php echo trim(htmlspecialchars($seat)); ?></span>
-                                            <?php endforeach; ?>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <span class="remaining-amount <?php echo $reservation['remaining'] == 0 ? 'remaining-paid' : ''; ?>">
-                                            <?php if ($reservation['remaining'] == 0): ?>
-                                                Paid
-                                            <?php else: ?>
-                                                EGP <?php echo number_format($reservation['remaining'], 2); ?>
-                                            <?php endif; ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <?php echo !empty($reservation['reserved_by']) ? htmlspecialchars($reservation['reserved_by']) : '<em>N/A</em>'; ?>
-                                    </td>
-                                    <td><?php echo date('M d, Y H:i', strtotime($reservation['created_at'])); ?></td>
-                                    <?php if ($userRole === 'Controller'): ?>
-                                        <td>
-                                            <div class="action-buttons">
-                                                <button class="btn-edit" onclick="openEditModal(<?php echo htmlspecialchars(json_encode($reservation), ENT_QUOTES, 'UTF-8'); ?>)">Edit</button>
-                                                <button class="btn-delete" onclick="confirmDelete(<?php echo $reservation['id']; ?>)">Delete</button>
-                                            </div>
-                                        </td>
-                                    <?php endif; ?>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                <?php else: ?>
-                    <div class="no-reservations">
-                        <p>No reservations found for this day.</p>
-                    </div>
-                <?php endif; ?>
-            </div>
+        <div id="reservationDataPanel" class="tab-content <?php echo $selectedTab === 'reservations' ? 'active' : ''; ?>">
+            <?php echo renderReservationData($allReservations, $selectedDay, $selectedArea); ?>
         </div>
     </div>
 
@@ -2280,7 +1958,7 @@ for ($i = 1; $i <= 11; $i++):
         <div class="seat-info-content" id="seatInfoContent">
             <h3>Seat: <span id="seatInfoSeatId"></span></h3>
             <p id="seatInfoStatus"></p>
-            <p>Reserved by:</p>
+            <p id="seatInfoOwnerLabel">Reserved by:</p>
             <p class="customer-name" id="seatInfoCustomerName"></p>
             <p class="remaining-info" id="seatInfoRemaining" style="display: none;"></p>
             <button class="close-seat-info" onclick="closeSeatInfo()">Close</button>
@@ -2288,22 +1966,22 @@ for ($i = 1; $i <= 11; $i++):
     </div>
 
     <!-- Reservation Modal -->
-    <div id="reservationModal" class="modal">
+    <div id="reservationModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="reservationTitle">
         <div class="modal-content">
             <span class="close-modal" onclick="closeReservationModal()">&times;</span>
+            <div id="reservationEditor">
             <div class="modal-header">
-                <h2>Complete Your Reservation</h2>
-                <?php if ($userRole === 'Viewer'): ?>
-                    <p style="color: #FF9800; font-size: 14px; margin-top: 10px;">
-                        Your reservation will be pending until approved by a Controller
-                    </p>
-                <?php endif; ?>
+                <h2 id="reservationTitle">Complete Your Reservation</h2>
+                <p id="reservationLocation" class="modal-location"><?php echo PERFORMANCE_DATES[$selectedDay]; ?></p>
+
             </div>
             
             <form method="POST" action="" id="reservationForm">
+                <div id="reservationFormError" class="live-notice" role="alert" hidden></div>
                 <input type="hidden" name="action" value="reserve">
                 <input type="hidden" name="day" value="<?php echo $selectedDay; ?>">
-                <input type="hidden" name="selected_seats" id="selectedSeatsInput">
+                <input type="hidden" name="area" value="<?php echo $selectedArea; ?>">
+                <input type="hidden" name="seat_codes" id="selectedSeatsInput">
                 
                 <div class="selected-seats-display">
                     <h3>Selected Seats:</h3>
@@ -2317,7 +1995,7 @@ for ($i = 1; $i <= 11; $i++):
 
                 <div class="form-group">
                     <label for="phone_number">Phone Number *</label>
-                    <input type="tel" id="phone_number" name="phone_number" required>
+                    <input type="tel" id="phone_number" name="customer_phone" required>
                 </div>
 
                 <div class="checkbox-group">
@@ -2326,40 +2004,42 @@ for ($i = 1; $i <= 11; $i++):
 </div>
 
 <div class="checkbox-group">
-    <input type="checkbox" id="receivedTicketCheckbox" name="received_ticket" value="1">
+    <input type="checkbox" id="receivedTicketCheckbox" name="tickets_received" value="1">
     <label for="receivedTicketCheckbox">Received Ticket</label>
 </div>
 
 <div class="checkbox-group khedma-checkbox-group">
-    <input type="checkbox" id="khedmaCheckbox" name="khedma" value="1" onchange="updateNewPriceInfo()">
-    <label for="khedmaCheckbox">Khedma (80 EGP / ticket)</label>
+    <input type="checkbox" id="khedmaCheckbox" name="has_service_discount" value="1" onchange="updateNewPriceInfo()">
+    <label for="khedmaCheckbox">Khedma (<?php echo TICKET_PRICES['khedma']; ?> EGP / theatre ticket)</label>
 </div>
 
 <div class="khedma-price-info" id="newPriceInfo" style="display:none;"></div>
 
                 <div class="form-group remaining-input" id="remainingGroup">
                     <label for="remaining">Remaining Amount (EGP) *</label>
-                    <input type="number" id="remaining" name="remaining" min="0" step="0.01" value="0">
+                    <input type="number" id="remaining" name="remaining_amount" min="0" step="0.01" value="0">
                 </div>
 
                 <input type="hidden" name="is_paid" id="isPaidInput" value="1">
 
-                <?php if ($userRole === 'Viewer'): ?>
-                    <div class="form-group">
-                        <label for="comment">Comment / Note *</label>
-                        <textarea id="comment" name="comment" required placeholder="Please add a comment about this reservation..."></textarea>
-                    </div>
-                <?php endif; ?>
+
 
                 <button type="submit" class="submit-btn">
-                    <?php echo $userRole === 'Viewer' ? 'Submit for Approval' : 'Confirm Reservation'; ?>
+                    Confirm Reservation
                 </button>
             </form>
+            </div>
+            <div id="reservationConflict" class="availability-notice" role="alert" hidden>
+                <div class="availability-icon" aria-hidden="true">&#9432;</div>
+                <h2 id="reservationConflictTitle">Seat availability changed</h2>
+                <p id="reservationConflictMessage"></p>
+                <button type="button" id="reservationConflictClose" class="submit-btn" onclick="closeReservationModal()">Close</button>
+            </div>
         </div>
     </div>
 
-    <!-- Edit Modal (Controller Only) -->
-    <?php if ($userRole === 'Controller'): ?>
+    <!-- Edit Reservation Modal -->
+
     <div id="editModal" class="modal">
         <div class="modal-content">
             <span class="close-modal" onclick="closeEditModal()">&times;</span>
@@ -2368,8 +2048,10 @@ for ($i = 1; $i <= 11; $i++):
             </div>
             
             <form method="POST" action="" id="editForm">
+                <div id="editLiveNotice" class="live-notice" role="alert" hidden></div>
                 <input type="hidden" name="action" value="update">
                 <input type="hidden" name="day" value="<?php echo $selectedDay; ?>">
+                <input type="hidden" name="area" value="<?php echo $selectedArea; ?>">
                 <input type="hidden" name="id" id="editId">
                 
                 <div class="form-group">
@@ -2379,27 +2061,28 @@ for ($i = 1; $i <= 11; $i++):
 
                 <div class="form-group">
                     <label for="edit_phone_number">Phone Number *</label>
-                    <input type="tel" id="edit_phone_number" name="phone_number" required>
+                    <input type="tel" id="edit_phone_number" name="customer_phone" required>
                 </div>
 
                 <div class="form-group">
                     <label for="edit_reserved_desks">Reserved Seats *</label>
-                    <textarea id="edit_reserved_desks" name="reserved_desks" required></textarea>
+                    <textarea id="edit_reserved_desks" name="seat_codes" required oninput="updateEditPriceInfo(false)"></textarea>
+                    <small>Main Theatre: AR1. Balcony: B-AR1. Keep the B- prefix for balcony seats.</small>
                 </div>
 
                 <div class="form-group">
     <label for="edit_remaining">Remaining Amount (EGP) *</label>
-    <input type="number" id="edit_remaining" name="remaining" min="0" step="0.01" required>
+    <input type="number" id="edit_remaining" name="remaining_amount" min="0" step="0.01" required>
 </div>
 
 <div class="checkbox-group">
-    <input type="checkbox" id="edit_received_ticket" name="received_ticket" value="1">
+    <input type="checkbox" id="edit_received_ticket" name="tickets_received" value="1">
     <label for="edit_received_ticket">Received Ticket</label>
 </div>
 
 <div class="checkbox-group khedma-checkbox-group">
-    <input type="checkbox" id="edit_khedmaCheckbox" name="khedma" value="1" onchange="updateEditPriceInfo()">
-    <label for="edit_khedmaCheckbox">Khedma (80 EGP / ticket)</label>
+    <input type="checkbox" id="edit_khedmaCheckbox" name="has_service_discount" value="1" onchange="updateEditPriceInfo()">
+    <label for="edit_khedmaCheckbox">Khedma (<?php echo TICKET_PRICES['khedma']; ?> EGP / theatre ticket)</label>
 </div>
 
 <div class="khedma-price-info" id="editPriceInfo" style="display:none;"></div>
@@ -2408,255 +2091,19 @@ for ($i = 1; $i <= 11; $i++):
             </form>
         </div>
     </div>
-    <?php endif; ?>
+
 
     <!-- Delete Confirmation Form -->
-    <?php if ($userRole === 'Controller'): ?>
+
     <form method="POST" action="" id="deleteForm" style="display: none;">
         <input type="hidden" name="action" value="delete">
         <input type="hidden" name="day" value="<?php echo $selectedDay; ?>">
+        <input type="hidden" name="area" value="<?php echo $selectedArea; ?>">
         <input type="hidden" name="id" id="deleteId">
     </form>
-    <?php endif; ?>
 
-    <script>
-    let selectedSeats = [];
-    const userRole = '<?php echo $userRole; ?>';
 
-    function showSeatInfo(seatId, customerName, remaining, isPending) {
-        const modal = document.getElementById('seatInfoModal');
-        const content = document.getElementById('seatInfoContent');
-        const remainingInfo = document.getElementById('seatInfoRemaining');
-        const statusElement = document.getElementById('seatInfoStatus');
-        
-        document.getElementById('seatInfoSeatId').textContent = seatId;
-        document.getElementById('seatInfoCustomerName').textContent = customerName;
-        
-        if (isPending) {
-            statusElement.textContent = '⏳ Status: Pending Approval';
-            statusElement.style.color = '#5D5978';
-            statusElement.style.fontWeight = 'bold';
-            statusElement.style.display = 'block';
-            content.style.borderColor = '#5D5978';
-        } else {
-            statusElement.style.display = 'none';
-            if (remaining && parseFloat(remaining) > 0) {
-                content.style.borderColor = '#A1CAE3'; // Cyan/light blue for unpaid, matching theme
-            } else {
-                content.style.borderColor = '#4CAF50'; // Green for paid
-            }
-        }
-        
-        if (remaining && parseFloat(remaining) > 0) {
-            content.classList.add('unpaid');
-            remainingInfo.style.display = 'block';
-            remainingInfo.innerHTML = '💰 Remaining Amount: <br><strong>EGP ' + parseFloat(remaining).toFixed(2) + '</strong>';
-        } else {
-            content.classList.remove('unpaid');
-            remainingInfo.style.display = 'none';
-        }
-        
-        modal.classList.add('active');
-    }
-
-    function closeSeatInfo() {
-        document.getElementById('seatInfoModal').classList.remove('active');
-    }
-
-    function toggleSeat(element) {
-        const seatId = element.getAttribute('data-seat');
-        
-        if (element.classList.contains('selected')) {
-            element.classList.remove('selected');
-            selectedSeats = selectedSeats.filter(seat => seat !== seatId);
-        } else {
-            element.classList.add('selected');
-            selectedSeats.push(seatId);
-        }
-        
-        updateReservationButton();
-    }
-
-    function updateReservationButton() {
-        const actionButton = document.getElementById('reservationAction');
-        const countElement = document.getElementById('selectedCount');
-        
-        if (selectedSeats.length > 0) {
-            actionButton.classList.add('visible');
-            countElement.textContent = selectedSeats.length;
-        } else {
-            actionButton.classList.remove('visible');
-        }
-    }
-
-    function openReservationModal() {
-        if (selectedSeats.length === 0) return;
-
-        const modal = document.getElementById('reservationModal');
-        const selectedSeatsList = document.getElementById('selectedSeatsList');
-        const selectedSeatsInput = document.getElementById('selectedSeatsInput');
-        selectedSeatsList.innerHTML = '';
-        selectedSeats.forEach(seat => {
-            const tag = document.createElement('span');
-            tag.className = 'selected-seat-tag';
-            tag.textContent = seat;
-            selectedSeatsList.appendChild(tag);
-        });
-        selectedSeatsInput.value = selectedSeats.join(', ');
-
-        // Reset khedma state each time modal opens
-        document.getElementById('khedmaCheckbox').checked = false;
-        document.getElementById('newPriceInfo').style.display = 'none';
-
-        modal.classList.add('active');
-    }
-
-    function closeReservationModal() {
-        const modal = document.getElementById('reservationModal');
-        modal.classList.remove('active');
-    }
-
-    function toggleRemainingInput() {
-        const checkbox   = document.getElementById('unpaidCheckbox');
-        const remainingGroup = document.getElementById('remainingGroup');
-        const remainingInput = document.getElementById('remaining');
-        const isPaidInput    = document.getElementById('isPaidInput');
-        const isKhedma       = document.getElementById('khedmaCheckbox').checked;
-        const pricePerSeat   = isKhedma ? 80 : 100;
-
-        if (checkbox.checked) {
-            remainingGroup.classList.add('visible');
-            remainingInput.required = true;
-            isPaidInput.value = '0';
-            // Auto-fill remaining based on khedma price
-            if (selectedSeats.length > 0) {
-                remainingInput.value = (selectedSeats.length * pricePerSeat).toFixed(2);
-            }
-        } else {
-            remainingGroup.classList.remove('visible');
-            remainingInput.required = false;
-            remainingInput.value = '0';
-            isPaidInput.value = '1';
-        }
-        updateNewPriceInfo();
-    }
-
-    function updateNewPriceInfo() {
-        const isKhedma     = document.getElementById('khedmaCheckbox').checked;
-        const isUnpaid     = document.getElementById('unpaidCheckbox').checked;
-        const infoBox      = document.getElementById('newPriceInfo');
-        const remainingInput = document.getElementById('remaining');
-        const pricePerSeat = isKhedma ? 80 : 100;
-        const seatCount    = selectedSeats.length;
-
-        if (!isKhedma) {
-            infoBox.style.display = 'none';
-            return;
-        }
-
-        const total = seatCount * pricePerSeat;
-        infoBox.style.display = 'block';
-        infoBox.innerHTML = `🎁 <strong>Khedma Price:</strong> ${pricePerSeat} EGP × ${seatCount} seat${seatCount !== 1 ? 's' : ''} = <strong>EGP ${total.toFixed(2)}</strong>`;
-
-        // Also auto-fill remaining if unpaid is checked
-        if (isUnpaid && seatCount > 0) {
-            remainingInput.value = total.toFixed(2);
-        }
-    }
-
-    function updateEditPriceInfo() {
-        const isKhedma     = document.getElementById('edit_khedmaCheckbox').checked;
-        const infoBox      = document.getElementById('editPriceInfo');
-        const seatsText    = document.getElementById('edit_reserved_desks').value;
-        const remainingInput = document.getElementById('edit_remaining');
-
-        const seatCount = seatsText.split(',').map(s => s.trim()).filter(s => s.length > 0).length;
-        const pricePerSeat = isKhedma ? 80 : 100;
-
-        if (!isKhedma) {
-            infoBox.style.display = 'none';
-            return;
-        }
-
-        const total = seatCount * pricePerSeat;
-        infoBox.style.display = 'block';
-        infoBox.innerHTML = `🎁 <strong>Khedma Price:</strong> ${pricePerSeat} EGP × ${seatCount} seat${seatCount !== 1 ? 's' : ''} = <strong>EGP ${total.toFixed(2)}</strong>`;
-        // Auto-fill remaining with khedma total
-        if (seatCount > 0) {
-            remainingInput.value = total.toFixed(2);
-        }
-    }
-
-    <?php if ($userRole === 'Controller'): ?>
-    function openEditModal(reservation) {
-        document.getElementById('editId').value = reservation.id;
-        document.getElementById('edit_customer_name').value = reservation.customer_name;
-        document.getElementById('edit_phone_number').value = reservation.phone_number;
-        document.getElementById('edit_reserved_desks').value = reservation.reserved_desks;
-        document.getElementById('edit_remaining').value = reservation.remaining;
-        document.getElementById('edit_received_ticket').checked = reservation.received_ticket == 1;
-
-        // Pre-populate khedma state from saved reservation
-        const khedmaBox = document.getElementById('edit_khedmaCheckbox');
-        khedmaBox.checked = reservation.khedma == 1;
-        updateEditPriceInfo(); // refresh price info panel immediately
-
-        document.getElementById('editModal').classList.add('active');
-    }
-
-    function closeEditModal() {
-        document.getElementById('editModal').classList.remove('active');
-    }
-
-    function confirmDelete(id) {
-        if (confirm('Are you sure you want to delete this reservation? This action cannot be undone.')) {
-            document.getElementById('deleteId').value = id;
-            document.getElementById('deleteForm').submit();
-        }
-    }
-    <?php endif; ?>
-    window.onclick = function(event) {
-        const reservationModal = document.getElementById('reservationModal');
-        const seatInfoModal = document.getElementById('seatInfoModal');
-        
-        if (event.target === reservationModal) {
-            closeReservationModal();
-        }
-        if (event.target === seatInfoModal) {
-            closeSeatInfo();
-        }
-        
-        <?php if ($userRole === 'Controller'): ?>
-        const editModal = document.getElementById('editModal');
-        if (event.target === editModal) {
-            closeEditModal();
-        }
-        <?php endif; ?>
-    }
-
-    document.getElementById('reservationForm').addEventListener('submit', function(e) {
-        const unpaidCheckbox = document.getElementById('unpaidCheckbox');
-        const remainingInput = document.getElementById('remaining');
-        
-        if (unpaidCheckbox && unpaidCheckbox.checked) {
-            const remainingValue = parseFloat(remainingInput.value);
-            if (isNaN(remainingValue) || remainingValue <= 0) {
-                e.preventDefault();
-                alert('Please enter a valid remaining amount greater than 0');
-                return false;
-            }
-        }
-        
-        <?php if ($userRole === 'Viewer'): ?>
-        const comment = document.getElementById('comment').value.trim();
-        if (comment.length === 0) {
-            e.preventDefault();
-            alert('Please add a comment for your reservation');
-            return false;
-        }
-        <?php endif; ?>
-    });
-</script>
+    <script id="theatre-state" type="application/json"><?php echo json_encode(['day' => $selectedDay, 'area' => $selectedArea, 'day_label' => PERFORMANCE_DATES[$selectedDay], 'prices' => TICKET_PRICES] + $snapshot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR); ?></script>
+    <script src="app.js?v=<?php echo filemtime(__DIR__ . '/app.js'); ?>"></script>
 </body>
-</html>>y>
-</html>>
+</html>
