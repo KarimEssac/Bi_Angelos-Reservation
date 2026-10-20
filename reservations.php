@@ -40,10 +40,12 @@ function performanceId(PDO $pdo, string $date): int
     return (int) $id;
 }
 
-function expireUnpaidReservations(PDO $pdo): void
+function expireReservations(PDO $pdo): void
 {
-    $pdo->exec('DELETE FROM reservations WHERE remaining_amount > 0
-        AND created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)');
+    $pdo->exec("DELETE FROM reservations
+        WHERE (approval_status = 'pending' AND created_at <= DATE_SUB(NOW(), INTERVAL 12 HOUR))
+        OR (approval_status = 'approved' AND remaining_amount > 0
+            AND created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR))");
 }
 
 function listReservations(PDO $pdo, int $performanceId): array
@@ -53,7 +55,10 @@ function listReservations(PDO $pdo, int $performanceId): array
         $pdo->beginTransaction();
     }
     try {
-        $stmt = $pdo->prepare('SELECT r.*, a.name AS reserved_by_name
+        $stmt = $pdo->prepare('SELECT r.id, r.performance_id, r.customer_name, r.customer_phone,
+            r.remaining_amount, r.approval_status, r.notes, r.tickets_received, r.has_service_discount,
+            r.reserved_by_admin_id, r.created_at, a.name AS reserved_by_name,
+            CASE WHEN r.approval_status = \'pending\' THEN DATE_ADD(r.created_at, INTERVAL 12 HOUR) ELSE NULL END AS expires_at
             FROM reservations r LEFT JOIN admins a ON a.id = r.reserved_by_admin_id
             WHERE r.performance_id = ? ORDER BY r.created_at DESC, r.id DESC');
         $stmt->execute([$performanceId]);
@@ -165,13 +170,19 @@ function performReservationAction(PDO $pdo, int $performanceId, int $adminId, ar
             throw new InvalidArgumentException('Performance not found.');
         }
         if ($action !== 'reserve') {
-            $stmt = $pdo->prepare('SELECT approval_status FROM reservations
-                WHERE id = ? AND performance_id = ? FOR UPDATE');
+            $stmt = $pdo->prepare("SELECT approval_status,
+                approval_status = 'pending' AND created_at <= DATE_SUB(NOW(), INTERVAL 12 HOUR) AS expired
+                FROM reservations
+                WHERE id = ? AND performance_id = ? FOR UPDATE");
             $stmt->execute([$id, $performanceId]);
-            $status = $stmt->fetchColumn();
-            if ($status === false) {
+            $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$existing) {
                 throw new InvalidArgumentException('Reservation not found for this day.');
             }
+            if ($existing['expired']) {
+                throw new InvalidArgumentException('This pending request has expired. Refresh the page for the latest availability.');
+            }
+            $status = $existing['approval_status'];
             if (in_array($action, ['approve', 'reject'], true) && $status !== 'pending') {
                 throw new InvalidArgumentException('This reservation is no longer pending approval.');
             }

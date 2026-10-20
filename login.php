@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/auth.php';
 if (currentAdmin($pdo)) {
-    header('Location: index.php');
+    header('Location: admoonzz');
     exit;
 }
 $error = '';
@@ -12,7 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($email === '' || $password === '') {
         $error = 'Enter your email address and password.';
     } elseif (loginAdmin($pdo, $email, $password)) {
-        header('Location: index.php');
+        header('Location: admoonzz');
         exit;
     } else {
         $error = 'Invalid email address or password.';

@@ -80,6 +80,7 @@ if (!isset($allReservations, $approvedReservations, $pendingReservations, $reser
             <?php if (count($pendingReservations) > 0): ?>
                 <!-- Pending Reservations Section -->
                 <div class="pending-section">
+                    <p class="booking-help">Verify the WhatsApp payment screenshot before approving a customer request. Unapproved requests are automatically removed after 12 hours.</p>
                     <h2>⏳ Pending Reservations Awaiting Approval</h2>
                     <div class="reservations-container">
                         <table class="reservations-table">
@@ -90,9 +91,10 @@ if (!isset($allReservations, $approvedReservations, $pendingReservations, $reser
                                     <th>Phone Number</th>
                                     <th>Area</th>
                                     <th>Reserved Seats</th>
-                                    <th>Remaining Amount</th>
+                                    <th>Payment</th>
                                     <th>Comment</th>
                                     <th>Created At</th>
+                                    <th>Expires At</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -116,7 +118,7 @@ if (!isset($allReservations, $approvedReservations, $pendingReservations, $reser
                                         <td>
                                             <span class="remaining-amount <?php echo $reservation['remaining_amount'] == 0 ? 'remaining-paid' : ''; ?>">
                                                 <?php if ($reservation['remaining_amount'] == 0): ?>
-                                                    Paid
+                                                    Reported paid
                                                 <?php else: ?>
                                                     EGP <?php echo number_format($reservation['remaining_amount'], 2); ?>
                                                 <?php endif; ?>
@@ -128,6 +130,7 @@ if (!isset($allReservations, $approvedReservations, $pendingReservations, $reser
                                             </div>
                                         </td>
                                         <td><?php echo date('M d, Y H:i', strtotime($reservation['created_at'])); ?></td>
+                                        <td><?php echo date('M d, Y H:i', strtotime($reservation['expires_at'])); ?></td>
                                         <td>
                                             <div class="action-buttons">
                                                 <form method="POST" action="" style="display: inline;">

@@ -27,7 +27,7 @@ try {
         throw new InvalidArgumentException('Choose Main Theatre or Balcony.');
     }
     $checkedSeats = isset($_GET['seats']) ? parseSeatCodes(is_string($_GET['seats']) ? $_GET['seats'] : '') : null;
-    expireUnpaidReservations($pdo);
+    expireReservations($pdo);
     $snapshot = reservationSnapshot($pdo, $performance);
     $changed = !is_string($_GET['revision'] ?? null) || $_GET['revision'] !== $snapshot['revision'];
     $response = ['authenticated' => true, 'day' => $day, 'area' => $area, 'revision' => $snapshot['revision'], 'changed' => $changed];

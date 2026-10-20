@@ -2,6 +2,8 @@
 
 function startTheatreApp(initial) {
     initial.area = initial.area || 'theatre';
+    const publicBooking = initial.public === true;
+    let publicStep = 1;
     let selectedSeats = [];
     let currentState = initial;
     let currentRevision = initial.revision;
@@ -16,6 +18,72 @@ function startTheatreApp(initial) {
     let stopped = false;
     const reservationFormElement = document.getElementById('reservationForm');
     const reservationSubmit = reservationFormElement.querySelector('button[type=submit]');
+
+    function setPublicStep(step) {
+        publicStep = step;
+        for (const section of document.querySelectorAll('[data-booking-step]')) {
+            section.hidden = Number(section.dataset.bookingStep) !== step;
+        }
+        for (const indicator of document.querySelectorAll('[data-step-indicator]')) {
+            const current = Number(indicator.dataset.stepIndicator) === step;
+            indicator.classList.toggle('current', current);
+            if (current) indicator.setAttribute('aria-current', 'step');
+            else indicator.removeAttribute('aria-current');
+        }
+        document.getElementById('paymentAcknowledged').value = step === 3 ? '1' : '0';
+        const name = document.getElementById('customer_name').value.trim();
+        const phone = document.getElementById('phone_number').value.trim();
+        document.getElementById('paymentCustomerSummary').textContent = name + ' - ' + phone;
+        for (const link of document.querySelectorAll('.payment-whatsapp')) {
+            link.href = initial.whatsapp_url + '?text=' + encodeURIComponent(
+                'Hello, my reservation name is ' + name + '. Date: ' + initial.day_label +
+                '. Seats: ' + modalSeatCodes.join(', ') + '. Here is my Instapay payment screenshot.'
+            );
+        }
+    }
+
+    function validatePublicDetails() {
+        const name = document.getElementById('customer_name');
+        name.value = name.value.trim();
+        const phone = document.getElementById('phone_number');
+        phone.setCustomValidity(/^\+?[0-9][0-9\s()-]{6,19}$/.test(phone.value.trim()) ? '' : 'Enter a valid phone number.');
+        if (!reservationFormElement.checkValidity()) {
+            setPublicStep(1);
+            reservationFormElement.reportValidity();
+            return false;
+        }
+        return true;
+    }
+
+    if (publicBooking) {
+        document.getElementById('phone_number').addEventListener('input', event => event.target.setCustomValidity(''));
+        for (const button of document.querySelectorAll('[data-step-forward]')) {
+            button.addEventListener('click', async () => {
+                if (reservationPhase !== 'idle' || reservationConflictActive || !validatePublicDetails()) return;
+                const attempt = ++reservationAttempt;
+                reservationPhase = 'checking';
+                document.getElementById('reservationFormError').hidden = true;
+                setReservationButton(true, 'Checking availability...');
+                try {
+                    const fresh = await refreshState({force: true, seats: [...modalSeatCodes]});
+                    if (attempt !== reservationAttempt || !document.getElementById('reservationModal').classList.contains('active')) return;
+                    if (!fresh.unavailable_seats.length && !reservationConflictActive) setPublicStep(Number(button.dataset.stepForward));
+                } catch (_) {
+                    if (attempt === reservationAttempt) showReservationError('Could not check availability. Check your connection and try again.');
+                } finally {
+                    if (attempt === reservationAttempt) {
+                        reservationPhase = 'idle';
+                        setReservationButton(reservationConflictActive);
+                    }
+                }
+            });
+        }
+        for (const button of document.querySelectorAll('[data-step-back]')) {
+            button.addEventListener('click', () => {
+                if (reservationPhase === 'idle' && !reservationConflictActive) setPublicStep(Number(button.dataset.stepBack));
+            });
+        }
+    }
 
     function ticketBreakdown(codes, isKhedma) {
         const theatreCount = codes.filter(code => !code.startsWith('B-')).length;
@@ -75,7 +143,7 @@ function startTheatreApp(initial) {
         const statusElement = document.getElementById('seatInfoStatus');
         
         document.getElementById('seatInfoSeatId').textContent = seatId;
-        document.getElementById('seatInfoCustomerName').textContent = customerName;
+        document.getElementById('seatInfoCustomerName').textContent = customerName || '';
         
         if (isPending) {
             statusElement.textContent = '⏳ Status: Pending Approval';
@@ -101,6 +169,12 @@ function startTheatreApp(initial) {
             remainingInfo.style.display = 'none';
         }
         
+        if (publicBooking) {
+            document.getElementById('seatInfoOwnerLabel').hidden = !customerName;
+            remainingInfo.style.display = 'none';
+            statusElement.textContent = isPending ? 'Pending confirmation' : 'Reserved';
+            statusElement.style.display = 'block';
+        }
         modal.classList.add('active');
     }
 
@@ -166,8 +240,13 @@ function startTheatreApp(initial) {
         document.getElementById('reservationLocation').textContent = areas.join(' + ') + ' - ' + initial.day_label;
 
         // Reset khedma state each time modal opens
-        document.getElementById('khedmaCheckbox').checked = false;
-        toggleRemainingInput();
+        if (publicBooking) {
+            setPublicStep(1);
+            updateNewPriceInfo();
+        } else {
+            document.getElementById('khedmaCheckbox').checked = false;
+            toggleRemainingInput();
+        }
 
         modal.classList.add('active');
         refreshState({force: true, seats: modalSeatCodes}).catch(() => {});
@@ -206,13 +285,13 @@ function startTheatreApp(initial) {
     }
 
     function updateNewPriceInfo() {
-        updateKhedmaLabel('khedmaCheckbox', modalSeatCodes);
-        const isKhedma = document.getElementById('khedmaCheckbox').checked;
+        if (!publicBooking) updateKhedmaLabel('khedmaCheckbox', modalSeatCodes);
+        const isKhedma = !publicBooking && document.getElementById('khedmaCheckbox').checked;
         const breakdown = ticketBreakdown(modalSeatCodes, isKhedma);
         const infoBox = document.getElementById('newPriceInfo');
         infoBox.style.display = 'block';
         infoBox.textContent = breakdown.text;
-        if (document.getElementById('unpaidCheckbox').checked) {
+        if (!publicBooking && document.getElementById('unpaidCheckbox').checked) {
             document.getElementById('remaining').value = breakdown.total.toFixed(2);
         }
     }
@@ -291,9 +370,12 @@ function startTheatreApp(initial) {
         notice.hidden = !message;
     }
 
-    function setReservationButton(disabled, text = 'Confirm Reservation') {
+    function setReservationButton(disabled, text = publicBooking ? 'Confirm reservation' : 'Confirm Reservation') {
         reservationSubmit.disabled = disabled;
         reservationSubmit.textContent = text;
+        if (publicBooking) {
+            for (const button of document.querySelectorAll('[data-step-forward], [data-step-back]')) button.disabled = disabled;
+        }
     }
 
     function showReservationError(message) {
@@ -313,7 +395,9 @@ function startTheatreApp(initial) {
         modal.setAttribute('aria-labelledby', 'reservationConflictTitle');
         const subject = codes.length === 1 ? 'Seat ' + codes[0] + ' is' : 'Seats ' + codes.join(', ') + ' are';
         document.getElementById('reservationConflictMessage').textContent = subject +
-            ' no longer available. A reservation was made while this window was open. Close this window and choose available seats from the updated map.';
+            ' no longer available. Another person reserved or requested these seats while this window was open. Your selection has been cleared. Close this window and choose available seats from the updated map.';
+        selectedSeats = [];
+        syncSeats();
         setReservationButton(true);
         document.getElementById('reservationConflictClose').focus();
     }
@@ -325,10 +409,12 @@ function startTheatreApp(initial) {
             if (element.classList.contains('blocked') || element.classList.contains('sound-control')) continue;
             const code = element.dataset.seat;
             const booking = occupied[code];
+            element.classList.toggle('own-seat', publicBooking && !!booking?.mine);
             element.classList.remove('available', 'reserved', 'reserved-unpaid', 'pending', 'selected');
             if (booking) {
                 element.classList.add(booking.pending ? 'pending' : booking.remaining_amount > 0 ? 'reserved-unpaid' : 'reserved');
-                element.title = (booking.pending ? 'Pending Approval - Reserved by ' : 'Reserved by ') + booking.customer_name;
+                element.title = (booking.pending ? 'Pending confirmation' : 'Reserved') +
+                    (booking.customer_name ? ' - ' + booking.customer_name : '');
                 element.onclick = () => showSeatInfo(code, booking.customer_name, booking.remaining_amount, booking.pending);
             } else {
                 element.classList.add('available');
@@ -385,11 +471,13 @@ function startTheatreApp(initial) {
         }
         syncSeats();
         const panel = document.getElementById('reservationDataPanel');
-        const positions = [...panel.querySelectorAll('.reservations-container')].map(element => element.scrollLeft);
-        panel.innerHTML = snapshot.reservations_html;
-        [...panel.querySelectorAll('.reservations-container')].forEach((element, index) => {
-            element.scrollLeft = positions[index] || 0;
-        });
+        if (panel) {
+            const positions = [...panel.querySelectorAll('.reservations-container')].map(element => element.scrollLeft);
+            panel.innerHTML = snapshot.reservations_html;
+            [...panel.querySelectorAll('.reservations-container')].forEach((element, index) => {
+                element.scrollLeft = positions[index] || 0;
+            });
+        }
         syncSeatInfo();
         syncEditingReservation();
     }
@@ -406,7 +494,7 @@ function startTheatreApp(initial) {
         const parameters = new URLSearchParams({day: initial.day, area: initial.area, revision: options.force ? '' : currentRevision});
         if (options.seats) parameters.set('seats', options.seats.join(','));
         refreshPromise = (async () => {
-            const response = await fetch('live.php?' + parameters, {
+            const response = await fetch((initial.live_url || 'live.php') + '?' + parameters, {
                 credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
                 headers: {'Accept': 'application/json'},
             });
@@ -433,9 +521,11 @@ function startTheatreApp(initial) {
     reservationFormElement.addEventListener('submit', async event => {
         event.preventDefault();
         if (reservationPhase !== 'idle' || reservationConflictActive || modalSeatCodes.length === 0) return;
+        if (publicBooking && publicStep !== 3) return;
+        if (publicBooking && !validatePublicDetails()) return;
         if (!reservationFormElement.reportValidity()) return;
         const amount = document.getElementById('remaining');
-        if (document.getElementById('unpaidCheckbox').checked && !(Number(amount.value) > 0)) {
+        if (!publicBooking && document.getElementById('unpaidCheckbox').checked && !(Number(amount.value) > 0)) {
             showReservationError('Please enter a remaining amount greater than zero.');
             return;
         }
@@ -453,8 +543,10 @@ function startTheatreApp(initial) {
             }
             reservationPhase = 'saving';
             setReservationButton(true, 'Completing reservation...');
-            const destination = new URL('index.php', window.location.href);
-            destination.search = new URLSearchParams({day: initial.day, area: initial.area, tab: 'map'}).toString();
+            const destination = new URL(initial.submit_url || 'admoonzz', window.location.href);
+            const parameters = new URLSearchParams({day: initial.day, area: initial.area});
+            if (!publicBooking) parameters.set('tab', 'map');
+            destination.search = parameters.toString();
             const response = await fetch(destination, {
                 method: 'POST', credentials: 'same-origin', cache: 'no-store',
                 headers: {'Accept': 'application/json'}, body: new FormData(reservationFormElement),
@@ -481,7 +573,8 @@ function startTheatreApp(initial) {
             if (attempt !== reservationAttempt) return;
             showReservationError(reservationPhase === 'checking'
                 ? 'Could not check seat availability. Check your connection and try again.'
-                : 'Could not confirm the result. Check Reservations Data before trying again.');
+                : publicBooking ? 'Could not confirm the result. Check your seats or contact us on WhatsApp before trying again.'
+                    : 'Could not confirm the result. Check Reservations Data before trying again.');
         } finally {
             if (!completed && attempt === reservationAttempt) {
                 reservationPhase = 'idle';
@@ -490,7 +583,7 @@ function startTheatreApp(initial) {
         }
     });
 
-    document.getElementById('editForm').addEventListener('submit', event => {
+    document.getElementById('editForm')?.addEventListener('submit', event => {
         syncEditingReservation();
         if (!document.getElementById('editLiveNotice').hidden) event.preventDefault();
     });
@@ -498,7 +591,7 @@ function startTheatreApp(initial) {
     document.addEventListener('keydown', event => {
         if (event.key !== 'Escape') return;
         if (document.getElementById('reservationModal').classList.contains('active')) closeReservationModal();
-        else if (document.getElementById('editModal').classList.contains('active')) closeEditModal();
+        else if (document.getElementById('editModal')?.classList.contains('active')) closeEditModal();
         else closeSeatInfo();
     });
     Object.assign(window, {showSeatInfo, closeSeatInfo, toggleSeat, openReservationModal,
@@ -525,7 +618,7 @@ function startLoginUpdates() {
         const timeout = setTimeout(() => controller.abort(), 8000);
         try {
             const response = await fetch('live.php?auth=1', {credentials: 'same-origin', cache: 'no-store', signal: controller.signal});
-            if (response.ok && (await response.json()).authenticated) window.location.replace('index.php');
+            if (response.ok && (await response.json()).authenticated) window.location.replace('admoonzz');
         } catch (_) {
             // Leave the login form usable while the connection recovers.
         } finally {
