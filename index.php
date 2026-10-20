@@ -19,11 +19,12 @@ try {
     expireReservations($pdo);
     if ($isPost) {
         if (($_POST['action'] ?? '') !== 'request') throw new InvalidArgumentException('Invalid booking request.');
-        submitPublicBooking($pdo, $performanceId, $browserToken, $_POST);
+        submitPublicBooking($pdo, $browserToken, $_POST);
         echo json_encode(['ok' => true, 'redirect' => './?day=' . $selectedDay . '&area=' . $selectedArea . '&requested=1']);
         exit;
     }
-    $snapshot = publicBookingSnapshot($pdo, $performanceId, $browserToken);
+    $calendarSnapshot = publicCalendarSnapshot($pdo, $browserToken);
+    $snapshot = $calendarSnapshot['calendar'][$selectedDay];
 } catch (Throwable $error) {
     $status = $error instanceof SeatConflictException ? 409 : ($error instanceof InvalidArgumentException ? 400 : 500);
     http_response_code($status);
@@ -47,6 +48,8 @@ $publicView = true;
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reserve Your Seats - Bi Angelos Theatre</title>
     <link rel="icon" type="image/jpeg" href="logo.jpg">
+    <link rel="stylesheet" href="mobile-inputs.css?v=<?php echo filemtime(__DIR__ . '/mobile-inputs.css'); ?>">
+    <link rel="stylesheet" href="scrollbars.css?v=<?php echo filemtime(__DIR__ . '/scrollbars.css'); ?>">
     <link rel="stylesheet" href="styles.css?v=<?php echo filemtime(__DIR__ . '/styles.css'); ?>">
 </head>
 <body class="public-booking">
@@ -82,7 +85,7 @@ $publicView = true;
         </div>
         <p id="liveNotice" class="live-notice" role="status" hidden></p>
         <?php if (isset($_GET['requested'])): ?>
-            <div class="success-message" role="status">Your request was submitted. Follow your seats on the map for their latest status. Send your payment screenshot and booking name to <a href="<?php echo BOOKING_WHATSAPP_URL; ?>" target="_blank" rel="noopener noreferrer"><?php echo BOOKING_WHATSAPP; ?></a> on WhatsApp. Requests stay pending until approved and expire after 12 hours if unapproved.</div>
+            <div class="success-message" role="status">Your request was submitted. Follow your seats on the map for their latest status. Send your payment screenshot and booking name to <a href="<?php echo BOOKING_WHATSAPP_URL; ?>" target="_blank" rel="noopener noreferrer"><?php echo BOOKING_WHATSAPP; ?></a> on WhatsApp. Requests stay pending until approved and expire after a short period if unapproved.</div>
         <?php endif; ?>
         <div class="legend">
             <div class="legend-items">
@@ -90,8 +93,9 @@ $publicView = true;
                 <div class="legend-item"><span class="legend-box reserved"></span><span>Reserved</span></div>
                 <div class="legend-item"><span class="legend-box pending"></span><span>Pending confirmation</span></div>
                 <div class="legend-item"><span class="legend-box selected"></span><span>Selected</span></div>
-                <div class="legend-item"><span class="legend-box own-seat"></span><span>Your seats</span></div>
+                <div class="legend-item"><span class="legend-own-seats" aria-hidden="true"><span class="legend-box pending own-seat"></span><span class="legend-box reserved own-seat"></span></span><span>Your seats</span></div>
                 <div class="legend-item"><span class="legend-box blocked" style="background:#000"></span><span>Unavailable</span></div>
+                <div class="legend-item"><span class="legend-box vip"></span><span>VIP (unavailable)</span></div>
             </div>
         </div>
         <?php require __DIR__ . '/seat_maps.php'; ?>
@@ -130,6 +134,7 @@ $publicView = true;
                     <input type="hidden" name="day" value="<?php echo $selectedDay; ?>">
                     <input type="hidden" name="area" value="<?php echo $selectedArea; ?>">
                     <input type="hidden" name="seat_codes" id="selectedSeatsInput">
+                    <input type="hidden" name="seat_basket" id="seatBasketInput">
                     <input type="hidden" name="csrf_token" value="<?php echo hash_hmac('sha256', 'submit-booking', $browserToken); ?>">
                     <input type="hidden" name="request_key" value="<?php echo bin2hex(random_bytes(16)); ?>">
                     <input type="hidden" name="payment_acknowledged" id="paymentAcknowledged" value="0">
@@ -146,7 +151,7 @@ $publicView = true;
                             <label for="phone_number">Phone number *</label>
                             <input type="tel" id="phone_number" name="customer_phone" maxlength="20" autocomplete="tel" required>
                         </div>
-                        <p class="booking-help">Seats are held only after the final confirmation. Another person can request them while you complete these steps.</p>
+                        <p class="booking-help">You can choose seats from both dates and both seating areas in one booking. Seats are held only after the final confirmation.</p>
                         <button type="button" class="submit-btn continue-btn" data-step-forward="2">Continue</button>
                     </section>
                     <section data-booking-step="2" hidden>
@@ -155,6 +160,10 @@ $publicView = true;
                         <button type="button" class="booking-back" data-step-back="1">Previous step</button>
                     </section>
                     <section data-booking-step="3" hidden>
+                        <div class="form-group">
+                            <label for="booking_comments">Add comments</label>
+                            <textarea id="booking_comments" name="notes" maxlength="2000" placeholder="Optional comments for the admins"></textarea>
+                        </div>
                         <div class="confirmation-summary">
                             <h3>Confirm your payment and reservation</h3>
                             <p id="paymentCustomerSummary"></p>
@@ -174,7 +183,7 @@ $publicView = true;
             </div>
         </div>
     </div>
-    <script id="theatre-state" type="application/json"><?php echo json_encode(['public' => true, 'day' => $selectedDay, 'area' => $selectedArea, 'day_label' => PERFORMANCE_DATES[$selectedDay], 'prices' => TICKET_PRICES, 'live_url' => 'public_live.php', 'submit_url' => './', 'whatsapp_url' => BOOKING_WHATSAPP_URL] + $snapshot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR); ?></script>
+    <script id="theatre-state" type="application/json"><?php echo json_encode(['public' => true, 'day' => $selectedDay, 'area' => $selectedArea, 'day_label' => PERFORMANCE_DATES[$selectedDay], 'days' => PERFORMANCE_DATES, 'prices' => TICKET_PRICES, 'live_url' => 'public_live.php', 'submit_url' => './', 'whatsapp_url' => BOOKING_WHATSAPP_URL] + $calendarSnapshot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR); ?></script>
     <script src="app.js?v=<?php echo filemtime(__DIR__ . '/app.js'); ?>"></script>
 </body>
 </html>

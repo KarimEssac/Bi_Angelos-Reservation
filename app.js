@@ -3,10 +3,14 @@
 function startTheatreApp(initial) {
     initial.area = initial.area || 'theatre';
     const publicBooking = initial.public === true;
+    initial.days = initial.days || {[initial.day]: initial.day_label};
     let publicStep = 1;
     let selectedSeats = [];
     let currentState = initial;
     let currentRevision = initial.revision;
+    const selectedApprovalGroups = new Map();
+    const reservationSearchIndex = new WeakMap();
+    let reservationSearchQuery = '';
     let modalSeatCodes = [];
     let reservationConflictActive = false;
     let reservationPhase = 'idle';
@@ -18,6 +22,270 @@ function startTheatreApp(initial) {
     let stopped = false;
     const reservationFormElement = document.getElementById('reservationForm');
     const reservationSubmit = reservationFormElement.querySelector('button[type=submit]');
+
+    function seatDetails(value) {
+        const separator = value.indexOf('|');
+        return separator < 0 ? {day: initial.day, code: value}
+            : {day: value.slice(0, separator), code: value.slice(separator + 1)};
+    }
+
+    function seatBasket(keys) {
+        const basket = {};
+        for (const key of keys) {
+            const {day, code} = seatDetails(key);
+            (basket[day] ||= []).push(code);
+        }
+        return basket;
+    }
+
+    function occupiedSeat(key) {
+        const {day, code} = seatDetails(key);
+        return currentState.calendar[day]?.seats[code];
+    }
+
+    function seatLabel(key) {
+        const {day, code} = seatDetails(key);
+        const area = code.startsWith('B-') ? 'Balcony ' + code.slice(2) : 'Main Theatre ' + code;
+        return initial.days[day] + ' - ' + area;
+    }
+
+    function bookingDescription(keys) {
+        return keys.map(seatLabel).join('; ');
+    }
+
+    function syncNavigation() {
+        for (const link of document.querySelectorAll('.day-selector:not(.area-selector) a')) {
+            const target = new URL(link.href);
+            const day = target.searchParams.get('day');
+            target.searchParams.set('area', initial.area);
+            link.href = target.href;
+            link.classList.toggle('active', day === initial.day);
+            if (day === initial.day) link.setAttribute('aria-current', 'date');
+            else link.removeAttribute('aria-current');
+            link.textContent = initial.days[day];
+            const count = selectedSeats.filter(key => seatDetails(key).day === day).length;
+            if (count) {
+                const badge = document.createElement('span');
+                badge.className = 'date-selection-count';
+                badge.textContent = count;
+                link.appendChild(badge);
+            }
+            link.setAttribute('aria-label', initial.days[day] + (count ? ', ' + count + ' seats selected' : ''));
+        }
+        for (const link of document.querySelectorAll('.area-selector a')) {
+            const target = new URL(link.href);
+            target.searchParams.set('day', initial.day);
+            link.href = target.href;
+            const active = link.dataset.area === initial.area;
+            link.classList.toggle('active', active);
+            if (active) link.setAttribute('aria-current', 'true');
+            else link.removeAttribute('aria-current');
+        }
+        for (const link of document.querySelectorAll('.tab-navigation a')) {
+            const target = new URL(link.href);
+            target.searchParams.set('day', initial.day);
+            target.searchParams.set('area', initial.area);
+            link.href = target.href;
+        }
+        for (const field of document.querySelectorAll('input[name="day"]:not([data-fixed-day])')) field.value = initial.day;
+        for (const field of document.querySelectorAll('input[name="area"]')) field.value = initial.area;
+        for (const form of document.querySelectorAll('form[data-reservation-day]')) {
+            const target = new URL(form.action);
+            target.searchParams.set('day', form.dataset.reservationDay);
+            target.searchParams.set('area', initial.area);
+            form.action = target.href;
+        }
+    }
+
+    function normalizeReservationSearch(value) {
+        return String(value).normalize('NFKC').toLocaleLowerCase()
+            .replace(/[\u0660-\u0669]/g, digit => String(digit.charCodeAt(0) - 0x0660))
+            .replace(/[\u06F0-\u06F9]/g, digit => String(digit.charCodeAt(0) - 0x06F0))
+            .replace(/[\u064B-\u065F\u0670]/g, '').replace(/\s+/g, ' ').trim();
+    }
+
+    function matchesReservationSearch(element, query) {
+        if (!query) return true;
+        let records = reservationSearchIndex.get(element);
+        if (!records) {
+            records = JSON.parse(element.dataset.searchRecords).map(record => ({
+                name: normalizeReservationSearch(record.name),
+                phone: normalizeReservationSearch(record.phone).replace(/\D/g, ''),
+            }));
+            reservationSearchIndex.set(element, records);
+        }
+        const phoneMatches = term => {
+            if (!/^[+\d\s().-]+$/.test(term)) return false;
+            const digits = term.replace(/\D/g, '');
+            if (!digits) return false;
+            const localDigits = digits.replace(/^(?:0020|20)/, '').replace(/^0/, '');
+            return records.some(record => record.phone.includes(digits) || (localDigits &&
+                record.phone.replace(/^(?:0020|20)/, '').replace(/^0/, '').includes(localDigits)));
+        };
+        if (records.some(record => record.name.includes(query)) || phoneMatches(query)) return true;
+        return query.split(' ').every(term => records.some(record => record.name.includes(term)) || phoneMatches(term));
+    }
+
+    function applyReservationSearch() {
+        if (publicBooking) return;
+        const panel = document.getElementById('reservationDataPanel');
+        const query = normalizeReservationSearch(reservationSearchQuery);
+        let pendingCount = 0;
+        let confirmedCount = 0;
+        for (const card of panel.querySelectorAll('[data-approval-group]')) {
+            card.hidden = !matchesReservationSearch(card, query);
+            if (!card.hidden) pendingCount++;
+        }
+        for (const row of panel.querySelectorAll('[data-confirmed-reservation]')) {
+            row.hidden = !(matchesReservationSearch(row, query) && (query || row.dataset.performanceDate === initial.day));
+            if (!row.hidden) confirmedCount++;
+        }
+        for (const overview of panel.querySelectorAll('[data-daily-overview]')) overview.hidden = !!query;
+        const confirmedResults = panel.querySelector('[data-confirmed-results]');
+        if (confirmedResults) confirmedResults.hidden = confirmedCount === 0;
+        const confirmedEmpty = panel.querySelector('[data-confirmed-empty]');
+        if (confirmedEmpty) {
+            confirmedEmpty.hidden = confirmedCount > 0;
+            confirmedEmpty.textContent = query ? 'No confirmed reservations match this search.'
+                : 'No confirmed reservations found for ' + initial.days[initial.day] + '.';
+        }
+        const confirmedScope = panel.querySelector('[data-confirmed-scope]');
+        if (confirmedScope) confirmedScope.textContent = query ? 'All dates' : initial.days[initial.day];
+        const pendingEmpty = panel.querySelector('[data-pending-empty]');
+        if (pendingEmpty) pendingEmpty.hidden = pendingCount > 0;
+        const pendingToolbar = panel.querySelector('[data-pending-toolbar]');
+        if (pendingToolbar) pendingToolbar.hidden = pendingCount === 0;
+        const selectAllLabel = panel.querySelector('.pending-select-all');
+        if (selectAllLabel) selectAllLabel.lastChild.textContent = query ? ' Select all matching pending bookings' : ' Select all pending bookings';
+        const status = document.getElementById('reservationSearchStatus');
+        const summary = pendingCount + ' pending bookings | ' + confirmedCount + ' confirmed reservations' +
+            (query ? ' across both dates.' : ' for ' + initial.days[initial.day] + '; pending bookings include both dates.');
+        if (status.textContent !== summary) status.textContent = summary;
+        document.getElementById('clearReservationSearch').disabled = !reservationSearchQuery;
+        syncApprovalSelection();
+    }
+
+    if (!publicBooking) {
+        const search = document.getElementById('reservationSearch');
+        search.addEventListener('input', () => {
+            reservationSearchQuery = search.value;
+            applyReservationSearch();
+        });
+        document.getElementById('clearReservationSearch').addEventListener('click', () => {
+            search.value = '';
+            reservationSearchQuery = '';
+            applyReservationSearch();
+            search.focus();
+        });
+    }
+
+    function syncApprovalSelection() {
+        if (publicBooking) return;
+        const allCards = [...document.querySelectorAll('[data-approval-group]')];
+        const cards = allCards.filter(card => !card.hidden);
+        for (const card of allCards.filter(card => card.hidden)) {
+            selectedApprovalGroups.delete(card.dataset.approvalGroup);
+            card.querySelector('[data-approval-checkbox]').checked = false;
+            card.classList.remove('is-selected');
+        }
+        const available = new Set();
+        for (const card of cards) {
+            const key = card.dataset.approvalGroup;
+            available.add(key);
+            const selected = selectedApprovalGroups.get(key);
+            if (selected && selected.version !== card.dataset.approvalVersion) selectedApprovalGroups.delete(key);
+            const checked = selectedApprovalGroups.has(key);
+            card.querySelector('[data-approval-checkbox]').checked = checked;
+            card.classList.toggle('is-selected', checked);
+        }
+        for (const key of selectedApprovalGroups.keys()) {
+            if (!available.has(key)) selectedApprovalGroups.delete(key);
+        }
+        const count = selectedApprovalGroups.size;
+        const button = document.getElementById('approveSelectedButton');
+        if (button) {
+            button.disabled = count === 0;
+            button.textContent = count ? 'Approve selected bookings (' + count + ')' : 'Approve selected bookings';
+        }
+        const selectAll = document.getElementById('selectAllPending');
+        if (selectAll) {
+            selectAll.checked = cards.length > 0 && count === cards.length;
+            selectAll.indeterminate = count > 0 && count < cards.length;
+        }
+    }
+
+    function setApprovalCardSelection(card, selected) {
+        if (selected) selectedApprovalGroups.set(card.dataset.approvalGroup, {
+            version: card.dataset.approvalVersion,
+            ids: JSON.parse(card.dataset.approvalIds),
+        });
+        else selectedApprovalGroups.delete(card.dataset.approvalGroup);
+    }
+
+    if (!publicBooking) {
+        document.addEventListener('change', event => {
+            if (event.target.matches('[data-approval-checkbox]')) {
+                setApprovalCardSelection(event.target.closest('[data-approval-group]'), event.target.checked);
+                syncApprovalSelection();
+            } else if (event.target.id === 'selectAllPending') {
+                for (const card of document.querySelectorAll('[data-approval-group]')) {
+                    if (!card.hidden) setApprovalCardSelection(card, event.target.checked);
+                }
+                syncApprovalSelection();
+            }
+        });
+        document.addEventListener('submit', event => {
+            if (event.target.id !== 'approveSelectedForm') return;
+            syncApprovalSelection();
+            if (!selectedApprovalGroups.size || !confirm('Approve ' + selectedApprovalGroups.size + ' selected bookings across all dates after verifying their payment screenshots?')) {
+                event.preventDefault();
+                return;
+            }
+            const fields = document.getElementById('selectedApprovalInputs');
+            fields.replaceChildren();
+            for (const selected of selectedApprovalGroups.values()) {
+                for (const id of selected.ids) {
+                    const field = document.createElement('input');
+                    field.type = 'hidden';
+                    field.name = 'reservation_ids[]';
+                    field.value = id;
+                    fields.appendChild(field);
+                }
+            }
+        });
+    }
+
+    function paintReservationData() {
+        const panel = document.getElementById('reservationDataPanel');
+        const state = currentState.calendar[initial.day];
+        if (panel && state?.reservations_html) {
+            const positions = [...panel.querySelectorAll('.reservations-container')].map(element => element.scrollLeft);
+            panel.innerHTML = state.reservations_html;
+            [...panel.querySelectorAll('.reservations-container')].forEach((element, index) => {
+                element.scrollLeft = positions[index] || 0;
+            });
+        }
+        syncNavigation();
+        applyReservationSearch();
+    }
+
+    function updateViewHistory() {
+        const target = new URL(window.location.href);
+        target.searchParams.set('day', initial.day);
+        target.searchParams.set('area', initial.area);
+        window.history.pushState(null, '', target);
+    }
+
+    function switchPerformanceDay(day, updateHistory = true) {
+        if (!initial.days[day]) return;
+        initial.day = day;
+        initial.day_label = initial.days[day];
+        closeSeatInfo();
+        if (activeEditingId !== null) closeEditModal();
+        paintReservationData();
+        syncSeats();
+        if (updateHistory) updateViewHistory();
+    }
 
     function setPublicStep(step) {
         publicStep = step;
@@ -36,8 +304,8 @@ function startTheatreApp(initial) {
         document.getElementById('paymentCustomerSummary').textContent = name + ' - ' + phone;
         for (const link of document.querySelectorAll('.payment-whatsapp')) {
             link.href = initial.whatsapp_url + '?text=' + encodeURIComponent(
-                'Hello, my reservation name is ' + name + '. Date: ' + initial.day_label +
-                '. Seats: ' + modalSeatCodes.join(', ') + '. Here is my Instapay payment screenshot.'
+                'Hello, my reservation name is ' + name + '. Booking: ' + bookingDescription(modalSeatCodes) +
+                '. Total: EGP ' + ticketBreakdown(modalSeatCodes, false).total.toFixed(2) + '. Here is my Instapay payment screenshot.'
             );
         }
     }
@@ -86,39 +354,29 @@ function startTheatreApp(initial) {
     }
 
     function ticketBreakdown(codes, isKhedma) {
-        const theatreCount = codes.filter(code => !code.startsWith('B-')).length;
-        const balconyCount = codes.length - theatreCount;
-        const theatrePrice = initial.prices[isKhedma ? 'khedma' : 'theatre'];
+        const basket = seatBasket(codes);
+        const days = Object.keys(basket).sort();
         const parts = [];
-        if (theatreCount) parts.push((isKhedma ? 'Khedma Theatre' : 'Main Theatre') + ': ' + theatreCount + ' x ' + theatrePrice + ' EGP');
-        if (balconyCount) parts.push('Balcony: ' + balconyCount + ' x ' + initial.prices.balcony + ' EGP');
-        const total = theatreCount * theatrePrice + balconyCount * initial.prices.balcony;
+        let total = 0;
+        for (const day of days) {
+            const seats = basket[day];
+            const theatreCount = seats.filter(code => !code.startsWith('B-')).length;
+            const balconyCount = seats.length - theatreCount;
+            const theatrePrice = initial.prices[isKhedma ? 'khedma' : 'theatre'];
+            if (days.length > 1) parts.push(initial.days[day]);
+            if (theatreCount) parts.push((isKhedma ? 'Khedma Theatre' : 'Main Theatre') + ': ' + theatreCount + ' x ' + theatrePrice + ' EGP');
+            if (balconyCount) parts.push('Balcony: ' + balconyCount + ' x ' + initial.prices.balcony + ' EGP');
+            total += theatreCount * theatrePrice + balconyCount * initial.prices.balcony;
+        }
         return {total, text: [...parts, 'Total: EGP ' + total.toFixed(2)].join('\n')};
     }
 
     function switchSeatingArea(area, updateHistory = true) {
         if (!['theatre', 'balcony'].includes(area)) return;
         initial.area = area;
-        for (const map of document.querySelectorAll('[data-map-area]')) {
-            map.hidden = map.dataset.mapArea !== area;
-        }
-        for (const link of document.querySelectorAll('.area-selector a')) {
-            const active = link.dataset.area === area;
-            link.classList.toggle('active', active);
-            if (active) link.setAttribute('aria-current', 'true');
-            else link.removeAttribute('aria-current');
-        }
-        for (const field of document.querySelectorAll('input[name="area"]')) field.value = area;
-        for (const link of document.querySelectorAll('.day-selector:not(.area-selector) a, .tab-navigation a')) {
-            const target = new URL(link.href);
-            target.searchParams.set('area', area);
-            link.href = target.href;
-        }
-        if (updateHistory) {
-            const target = new URL(window.location.href);
-            target.searchParams.set('area', area);
-            window.history.pushState(null, '', target);
-        }
+        for (const map of document.querySelectorAll('[data-map-area]')) map.hidden = map.dataset.mapArea !== area;
+        syncNavigation();
+        if (updateHistory) updateViewHistory();
     }
 
     for (const link of document.querySelectorAll('.area-selector a')) {
@@ -128,21 +386,29 @@ function startTheatreApp(initial) {
             if (link.dataset.area !== initial.area) switchSeatingArea(link.dataset.area);
         });
     }
+    for (const link of document.querySelectorAll('.day-selector:not(.area-selector) a')) {
+        link.addEventListener('click', event => {
+            if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            const day = new URL(link.href).searchParams.get('day');
+            if (day !== initial.day) switchPerformanceDay(day);
+        });
+    }
     window.addEventListener('popstate', () => {
-        switchSeatingArea(new URL(window.location.href).searchParams.get('area') || 'theatre', false);
+        const target = new URL(window.location.href);
+        switchSeatingArea(target.searchParams.get('area') || 'theatre', false);
+        switchPerformanceDay(target.searchParams.get('day') || Object.keys(initial.days)[0], false);
     });
 
-
-
-    function showSeatInfo(seatId, customerName, remaining, isPending) {
-        activeSeatInfo = seatId;
+    function showSeatInfo(seatId, customerName, remaining, isPending, day = initial.day) {
+        activeSeatInfo = day + '|' + seatId;
         document.getElementById('seatInfoOwnerLabel').hidden = false;
         const modal = document.getElementById('seatInfoModal');
         const content = document.getElementById('seatInfoContent');
         const remainingInfo = document.getElementById('seatInfoRemaining');
         const statusElement = document.getElementById('seatInfoStatus');
         
-        document.getElementById('seatInfoSeatId').textContent = seatId;
+        document.getElementById('seatInfoSeatId').textContent = initial.days[day] + ' - ' + seatId;
         document.getElementById('seatInfoCustomerName').textContent = customerName || '';
         
         if (isPending) {
@@ -185,7 +451,7 @@ function startTheatreApp(initial) {
 
     function toggleSeat(element) {
         if (!element.classList.contains('available')) return;
-        const seatId = element.getAttribute('data-seat');
+        const seatId = initial.day + '|' + element.getAttribute('data-seat');
         
         if (element.classList.contains('selected')) {
             element.classList.remove('selected');
@@ -208,6 +474,7 @@ function startTheatreApp(initial) {
         } else {
             actionButton.classList.remove('visible');
         }
+        syncNavigation();
     }
 
     function openReservationModal() {
@@ -227,17 +494,22 @@ function startTheatreApp(initial) {
         const selectedSeatsList = document.getElementById('selectedSeatsList');
         const selectedSeatsInput = document.getElementById('selectedSeatsInput');
         selectedSeatsList.innerHTML = '';
-        selectedSeats.forEach(seat => {
-            const tag = document.createElement('span');
-            tag.className = 'selected-seat-tag';
-            tag.textContent = seat.startsWith('B-') ? 'Balcony ' + seat.slice(2) : 'Main Theatre ' + seat;
-            selectedSeatsList.appendChild(tag);
-        });
-        selectedSeatsInput.value = selectedSeats.join(', ');
-        const areas = [];
-        if (selectedSeats.some(code => !code.startsWith('B-'))) areas.push('Main Theatre');
-        if (selectedSeats.some(code => code.startsWith('B-'))) areas.push('Balcony');
-        document.getElementById('reservationLocation').textContent = areas.join(' + ') + ' - ' + initial.day_label;
+        const basket = seatBasket(modalSeatCodes);
+        for (const day of Object.keys(basket).sort()) {
+            const heading = document.createElement('div');
+            heading.className = 'selected-seats-day';
+            heading.textContent = initial.days[day];
+            selectedSeatsList.appendChild(heading);
+            for (const code of basket[day]) {
+                const tag = document.createElement('span');
+                tag.className = 'selected-seat-tag';
+                tag.textContent = code.startsWith('B-') ? 'Balcony ' + code.slice(2) : 'Main Theatre ' + code;
+                selectedSeatsList.appendChild(tag);
+            }
+        }
+        selectedSeatsInput.value = (basket[initial.day] || []).join(', ');
+        document.getElementById('seatBasketInput').value = JSON.stringify(basket);
+        document.getElementById('reservationLocation').textContent = Object.keys(basket).sort().map(day => initial.days[day]).join(' / ');
 
         // Reset khedma state each time modal opens
         if (publicBooking) {
@@ -278,7 +550,7 @@ function startTheatreApp(initial) {
     }
 
     function updateKhedmaLabel(checkboxId, codes) {
-        const balconyNote = codes.some(code => code.startsWith('B-'))
+        const balconyNote = codes.some(code => seatDetails(code).code.startsWith('B-'))
             ? '; balcony stays ' + initial.prices.balcony + ' EGP' : '';
         document.querySelector('label[for="' + checkboxId + '"]').textContent =
             'Khedma (' + initial.prices.khedma + ' EGP / theatre ticket' + balconyNote + ')';
@@ -311,6 +583,7 @@ function startTheatreApp(initial) {
 
 
     function openEditModal(reservation) {
+        if (reservation.performance_date !== initial.day) switchPerformanceDay(reservation.performance_date);
         activeEditingId = String(reservation.id);
         editingFingerprint = JSON.stringify(reservation);
         document.getElementById('editLiveNotice').hidden = true;
@@ -337,8 +610,9 @@ function startTheatreApp(initial) {
         document.getElementById('editModal').classList.remove('active');
     }
 
-    function confirmDelete(id) {
+    function confirmDelete(id, day = initial.day) {
         if (confirm('Are you sure you want to delete this reservation? This action cannot be undone.')) {
+            if (day !== initial.day) switchPerformanceDay(day);
             document.getElementById('deleteId').value = id;
             document.getElementById('deleteForm').submit();
         }
@@ -393,7 +667,8 @@ function startTheatreApp(initial) {
         document.getElementById('reservationEditor').hidden = true;
         document.getElementById('reservationConflict').hidden = false;
         modal.setAttribute('aria-labelledby', 'reservationConflictTitle');
-        const subject = codes.length === 1 ? 'Seat ' + codes[0] + ' is' : 'Seats ' + codes.join(', ') + ' are';
+        const labels = codes.map(seatLabel);
+        const subject = codes.length === 1 ? 'Seat ' + labels[0] + ' is' : 'Seats ' + labels.join(', ') + ' are';
         document.getElementById('reservationConflictMessage').textContent = subject +
             ' no longer available. Another person reserved or requested these seats while this window was open. Your selection has been cleared. Close this window and choose available seats from the updated map.';
         selectedSeats = [];
@@ -403,12 +678,12 @@ function startTheatreApp(initial) {
     }
 
     function syncSeats() {
-        const occupied = currentState.seats;
         const selected = new Set(selectedSeats);
         for (const element of document.querySelectorAll('.seat[data-seat]')) {
-            if (element.classList.contains('blocked') || element.classList.contains('sound-control')) continue;
+            if (element.classList.contains('blocked') || element.classList.contains('sound-control') || element.classList.contains('vip')) continue;
             const code = element.dataset.seat;
-            const booking = occupied[code];
+            const key = initial.day + '|' + code;
+            const booking = occupiedSeat(key);
             element.classList.toggle('own-seat', publicBooking && !!booking?.mine);
             element.classList.remove('available', 'reserved', 'reserved-unpaid', 'pending', 'selected');
             if (booking) {
@@ -418,7 +693,7 @@ function startTheatreApp(initial) {
                 element.onclick = () => showSeatInfo(code, booking.customer_name, booking.remaining_amount, booking.pending);
             } else {
                 element.classList.add('available');
-                if (selected.has(code)) element.classList.add('selected');
+                if (selected.has(key)) element.classList.add('selected');
                 element.title = 'Available - Click to reserve';
                 element.onclick = () => toggleSeat(element);
             }
@@ -428,9 +703,10 @@ function startTheatreApp(initial) {
 
     function syncSeatInfo() {
         if (activeSeatInfo === null) return;
-        const booking = currentState.seats[activeSeatInfo];
+        const {day, code} = seatDetails(activeSeatInfo);
+        const booking = occupiedSeat(activeSeatInfo);
         if (booking) {
-            showSeatInfo(activeSeatInfo, booking.customer_name, booking.remaining_amount, booking.pending);
+            showSeatInfo(code, booking.customer_name, booking.remaining_amount, booking.pending, day);
         } else {
             const status = document.getElementById('seatInfoStatus');
             status.textContent = 'This seat is now available.';
@@ -446,7 +722,7 @@ function startTheatreApp(initial) {
 
     function syncEditingReservation() {
         if (activeEditingId === null) return;
-        const current = currentState.reservations.find(row => String(row.id) === activeEditingId);
+        const current = currentState.calendar[initial.day].reservations.find(row => String(row.id) === activeEditingId);
         const changed = !current || JSON.stringify(current) !== editingFingerprint;
         const notice = document.getElementById('editLiveNotice');
         notice.hidden = !changed;
@@ -459,27 +735,23 @@ function startTheatreApp(initial) {
     }
 
     function applySnapshot(snapshot) {
-        currentRevision = snapshot.revision;
-        if (!snapshot.changed) return;
+        if (!snapshot.changed) {
+            currentRevision = snapshot.revision;
+            return;
+        }
         currentState = snapshot;
-        const blocked = modalSeatCodes.filter(code => snapshot.seats[code]);
+        const blocked = modalSeatCodes.filter(occupiedSeat);
         if (blocked.length) showReservationConflict(blocked);
-        const removed = selectedSeats.filter(code => snapshot.seats[code]);
-        selectedSeats = selectedSeats.filter(code => !snapshot.seats[code]);
+        const removed = selectedSeats.filter(occupiedSeat);
+        selectedSeats = selectedSeats.filter(code => !occupiedSeat(code));
         if (removed.length && !document.getElementById('reservationModal').classList.contains('active')) {
-            showLiveNotice('Availability changed for ' + removed.join(', ') + '. Please choose available seats from the updated map.');
+            showLiveNotice('Availability changed for ' + removed.map(seatLabel).join(', ') + '. Please choose available seats from the updated map.');
         }
         syncSeats();
-        const panel = document.getElementById('reservationDataPanel');
-        if (panel) {
-            const positions = [...panel.querySelectorAll('.reservations-container')].map(element => element.scrollLeft);
-            panel.innerHTML = snapshot.reservations_html;
-            [...panel.querySelectorAll('.reservations-container')].forEach((element, index) => {
-                element.scrollLeft = positions[index] || 0;
-            });
-        }
+        paintReservationData();
         syncSeatInfo();
         syncEditingReservation();
+        currentRevision = snapshot.revision;
     }
 
     async function refreshState(options = {}) {
@@ -491,8 +763,7 @@ function startTheatreApp(initial) {
         }
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 8000);
-        const parameters = new URLSearchParams({day: initial.day, area: initial.area, revision: options.force ? '' : currentRevision});
-        if (options.seats) parameters.set('seats', options.seats.join(','));
+        const parameters = new URLSearchParams({day: initial.day, area: initial.area, revision: options.force || options.seats ? '' : currentRevision});
         refreshPromise = (async () => {
             const response = await fetch((initial.live_url || 'live.php') + '?' + parameters, {
                 credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
@@ -505,8 +776,9 @@ function startTheatreApp(initial) {
             }
             if (!response.ok) throw new Error('Could not refresh reservations.');
             const snapshot = await response.json();
-            if (snapshot.day !== initial.day || snapshot.area !== initial.area) throw new Error('Unexpected performance or seating area.');
+            if (snapshot.changed && !snapshot.calendar) throw new Error('Could not refresh both dates.');
             applySnapshot(snapshot);
+            snapshot.unavailable_seats = (options.seats || []).filter(occupiedSeat);
             if (snapshot.unavailable_seats?.length) showReservationConflict(snapshot.unavailable_seats);
             return snapshot;
         })();
@@ -538,7 +810,7 @@ function startTheatreApp(initial) {
             const fresh = await refreshState({force: true, seats: [...modalSeatCodes]});
             if (attempt !== reservationAttempt || !document.getElementById('reservationModal').classList.contains('active')) return;
             if (fresh.unavailable_seats.length || reservationConflictActive) {
-                showReservationConflict(fresh.unavailable_seats.length ? fresh.unavailable_seats : modalSeatCodes.filter(code => currentState.seats[code]));
+                showReservationConflict(fresh.unavailable_seats.length ? fresh.unavailable_seats : modalSeatCodes.filter(occupiedSeat));
                 return;
             }
             reservationPhase = 'saving';
@@ -598,6 +870,7 @@ function startTheatreApp(initial) {
         closeReservationModal, toggleRemainingInput, updateNewPriceInfo, updateEditPriceInfo,
         openEditModal, closeEditModal, confirmDelete});
     syncSeats();
+    applyReservationSearch();
     async function poll() {
         try { await refreshState(); } catch (_) { /* The status reports reconnection attempts. */ }
         if (!stopped) setTimeout(poll, 1000);

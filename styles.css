@@ -915,24 +915,6 @@
     margin: auto; 
 }
 
-.modal-content::-webkit-scrollbar {
-    width: 8px;
-}
-
-.modal-content::-webkit-scrollbar-track {
-    background: #f1f1f1;
-    border-radius: 4px;
-}
-
-.modal-content::-webkit-scrollbar-thumb {
-    background: #207FBD;
-    border-radius: 4px;
-}
-
-.modal-content::-webkit-scrollbar-thumb:hover {
-    background: #FC723E;
-}
-
         @keyframes slideUp {
             from { transform: translateY(50px); opacity: 0; }
             to { transform: translateY(0); opacity: 1; }
@@ -1542,8 +1524,8 @@
 .public-controls { grid-template-columns: 1fr 1fr; }
 .public-booking .header { padding-top: 12px; }
 .public-booking .container { padding-bottom: 110px; }
-.seat.own-seat, .legend-box.own-seat { outline: 2px solid #FC723E; outline-offset: 2px; }
-.legend-box.own-seat { background: #f8fbfd; }
+.seat.own-seat, .legend-box.own-seat { outline: 2px solid #e53935; outline-offset: 2px; }
+.legend-own-seats { display: inline-flex; gap: 8px; align-items: center; }
 .public-booking .close-modal { border: 0; background: transparent; line-height: 1; }
 .booking-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; list-style: none; margin: 0 0 20px; }
 .booking-steps li { padding: 9px 4px; color: #657789; font-size: 12px; text-align: center; border-bottom: 3px solid #dce7ef; }
@@ -1559,6 +1541,66 @@
 .payment-details p:last-child, .confirmation-summary p:last-child { margin-bottom: 0; }
 .instapay-account { padding: 12px; font-weight: 700; overflow-wrap: anywhere; background: #eaf4fb; border-radius: 6px; }
 .instapay-placeholder { padding: 12px; border: 1px dashed #b4c9d8; border-radius: 6px; color: #536a7b; }
+.instapay-recipients { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.instapay-recipient { min-width: 0; padding: 12px; border: 1px solid #dce7ef; border-radius: 8px; background: white; text-align: center; }
+.instapay-recipient h4 { color: #207FBD; margin-bottom: 8px; }
+.instapay-qr { display: block; width: 100%; max-width: 260px; height: auto; margin: 0 auto 8px; }
+.instapay-address { font-size: 12px; overflow-wrap: anywhere; }
+.instapay-redirect { display: inline-block; color: #207FBD; font-size: 13px; font-weight: 700; text-underline-offset: 3px; }
+.date-selection-count { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; margin-left: 6px; padding: 0 4px; border-radius: 10px; background: #FC723E; color: white; font-size: 11px; }
+.selected-seats-day { flex-basis: 100%; margin-top: 8px; font-weight: 700; font-size: 14px; }
+.selected-seats-day:first-child { margin-top: 0; }
+@media (max-width: 480px) { .instapay-recipients { grid-template-columns: 1fr; } }
 .payment-whatsapp { color: #15713c; font-weight: 700; white-space: nowrap; text-underline-offset: 3px; }
 .public-booking a:focus-visible, .public-booking button:focus-visible { outline: 3px solid #FC723E; outline-offset: 3px; }
 @media (max-width: 560px) { .public-controls { grid-template-columns: 1fr; } }
+
+/* Pending checkouts across all performance dates */
+.pending-inbox { margin-top: 28px; }
+.pending-toolbar, .pending-booking-header, .pending-booking-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.pending-toolbar { margin-bottom: 16px; padding: 14px 16px; background: #edf5fb; border-radius: 10px; }
+.pending-select-all, .pending-booking-select { display: flex; align-items: center; gap: 12px; cursor: pointer; color: #24536f; }
+.pending-inbox input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; accent-color: #207FBD; cursor: pointer; }
+.pending-toolbar button:disabled { opacity: 0.5; cursor: not-allowed; }
+.pending-booking-list { display: grid; gap: 16px; }
+.pending-booking-card { border: 1px solid #cbdde9; border-radius: 12px; background: white; overflow: hidden; }
+.pending-booking-card.is-selected { border-color: #207FBD; box-shadow: 0 0 0 1px #207FBD; }
+.pending-booking-header { padding: 16px; background: #f5f9fc; }
+.pending-booking-select strong { display: block; font-size: 17px; overflow-wrap: anywhere; }
+.pending-booking-select small, .pending-booking-total small { display: block; margin-top: 4px; color: #5c7182; font-size: 12px; font-weight: 400; }
+.pending-booking-total { color: #207FBD; font-weight: 700; text-align: right; }
+.pending-booking-member { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border-top: 1px solid #e3edf4; }
+.pending-booking-member > div { min-width: 0; }
+.pending-booking-member p { margin: 5px 0 9px; color: #5c7182; font-size: 13px; }
+.pending-member-status { display: inline-block; margin-left: 8px; padding: 3px 7px; border-radius: 5px; font-size: 11px; background: #ecebf1; color: #5D5978; }
+.pending-member-status.approved { color: #21683b; background: #e9f6ed; }
+.pending-member-seats { display: flex; flex-wrap: wrap; gap: 6px; }
+.pending-member-seats .seat-badge { margin: 0; }
+.pending-booking-comment { padding: 12px 16px; border-top: 1px solid #e3edf4; font-size: 13px; color: #445969; line-height: 1.6; overflow-wrap: anywhere; }
+.pending-booking-footer { padding: 12px 16px; border-top: 1px solid #e3edf4; }
+.pending-booking-footer > span { color: #5c7182; font-size: 12px; }
+.pending-inbox .btn-edit, .pending-inbox .btn-delete { text-transform: none; }
+@media (max-width: 560px) {
+    .pending-booking-member { align-items: flex-start; flex-direction: column; gap: 10px; }
+    .pending-toolbar form, .pending-toolbar button { width: 100%; }
+    .pending-booking-total { text-align: left; }
+}
+
+/* Search stays outside the live-updated reservation results. */
+.reservation-search { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px 14px; padding: 18px; margin-bottom: 24px; border: 1px solid #dce7ef; border-radius: 12px; background: #f8fbfd; }
+.seat.vip, .legend-box.vip { background-color: #c026d3; border-color: #86198f; color: white; }
+.seat.vip { cursor: not-allowed; }
+.tab-content.reservation-data-view.active { display: flex; flex-direction: column; }
+.reservation-data-view #reservationDataPanel { display: contents; }
+.reservation-data-view [data-daily-overview] { order: -2; }
+.reservation-data-view .reservation-search { order: -1; }
+.reservation-data-view .pending-inbox { margin-top: 0; }
+.reservation-search-field { flex: 1; min-width: 200px; }
+.reservation-search label { display: block; margin-bottom: 8px; color: #24536f; font-size: 14px; font-weight: 700; }
+.reservation-search input { display: block; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #abc8dc; border-radius: 7px; background: white; color: #243746; font: inherit; font-size: 16px; }
+.reservation-search input:focus { outline: 2px solid #207FBD; outline-offset: 2px; }
+.reservation-search button { min-height: 44px; padding: 10px 14px; border: 1px solid #abc8dc; border-radius: 7px; background: white; color: #207FBD; cursor: pointer; font: inherit; font-size: 14px; }
+.reservation-search button:disabled { opacity: 0.5; cursor: default; }
+.reservation-search p { flex-basis: 100%; color: #5c7182; font-size: 13px; line-height: 1.5; }
+.confirmed-reservations-title { margin: 24px 0 16px; color: #207FBD; font-size: 22px; }
+.confirmed-reservations-title span { display: inline-block; margin-left: 8px; color: #5c7182; font-size: 14px; font-weight: 400; }

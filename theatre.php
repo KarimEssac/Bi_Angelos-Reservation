@@ -57,7 +57,7 @@ function parseSeatCodes(string $input): array
         $row = $match[2];
         $number = (int) $match[3];
         if (!isset($rows[$row]) || $number > $rows[$row]
-            || (!$isBalcony && (isSoundControl($row, $number) || isTheatreSeatBlocked($code)))) {
+            || (!$isBalcony && (isSoundControl($row, $number) || isTheatreSeatBlocked($code) || isVipSeat($code)))) {
             throw new InvalidArgumentException('Choose valid, available seats from the seat map.');
         }
     }
@@ -76,6 +76,11 @@ function isSoundControl($row, $seatNum): bool
 function isTheatreSeatBlocked(string $seatCode): bool
 {
     return in_array($seatCode, ['FL11', 'FR11', 'NR1'], true);
+}
+
+function isVipSeat(string $seatCode): bool
+{
+    return preg_match('/\AAL(?:[1-9]|1[01])\z/', $seatCode) === 1;
 }
 
 function isSeatReserved($seat, $reservedSeats): bool

@@ -1,0 +1,30 @@
+html, body, .modal, .modal-content {
+    scrollbar-width: thin;
+    scrollbar-color: #207FBD #f1f1f1;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+.modal::-webkit-scrollbar,
+.modal-content::-webkit-scrollbar { width: 8px; }
+
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track,
+.modal::-webkit-scrollbar-track,
+.modal-content::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb,
+.modal::-webkit-scrollbar-thumb,
+.modal-content::-webkit-scrollbar-thumb {
+    background: #207FBD;
+    border-radius: 4px;
+}
+
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover,
+.modal::-webkit-scrollbar-thumb:hover,
+.modal-content::-webkit-scrollbar-thumb:hover { background: #FC723E; }

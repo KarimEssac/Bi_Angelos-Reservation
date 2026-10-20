@@ -28,16 +28,22 @@ try {
     }
     $checkedSeats = isset($_GET['seats']) ? parseSeatCodes(is_string($_GET['seats']) ? $_GET['seats'] : '') : null;
     expireReservations($pdo);
-    $snapshot = reservationSnapshot($pdo, $performance);
+    $snapshot = reservationCalendarSnapshot($pdo, $area, false);
     $changed = !is_string($_GET['revision'] ?? null) || $_GET['revision'] !== $snapshot['revision'];
     $response = ['authenticated' => true, 'day' => $day, 'area' => $area, 'revision' => $snapshot['revision'], 'changed' => $changed];
     if ($changed) {
-        $response['reservations'] = $snapshot['reservations'];
-        $response['seats'] = $snapshot['seats'];
-        $response['reservations_html'] = renderReservationData($snapshot['reservations'], $day, $area);
+        $allDates = array_merge(...array_column($snapshot['calendar'], 'reservations'));
+        foreach ($snapshot['calendar'] as $date => &$state) {
+            $state['reservations_html'] = renderReservationData($state['reservations'], $date, $area, $allDates);
+        }
+        unset($state);
+        $response['calendar'] = $snapshot['calendar'];
+        $response['seats'] = $snapshot['calendar'][$day]['seats'];
+        $response['reservations'] = $snapshot['calendar'][$day]['reservations'];
+        $response['reservations_html'] = $snapshot['calendar'][$day]['reservations_html'];
     }
     if ($checkedSeats !== null) {
-        $response['unavailable_seats'] = array_values(array_filter($checkedSeats, fn($code) => isset($snapshot['seats']->$code)));
+        $response['unavailable_seats'] = array_values(array_filter($checkedSeats, fn($code) => isset($snapshot['calendar'][$day]['seats']->$code)));
     }
     echo json_encode($response, JSON_THROW_ON_ERROR);
 } catch (InvalidArgumentException $error) {

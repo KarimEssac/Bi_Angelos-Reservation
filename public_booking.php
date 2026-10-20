@@ -2,7 +2,12 @@
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/reservations.php';
 
-const INSTAPAY_ACCOUNT = ''; // Add the payment address here when supplied.
+const INSTAPAY_RECIPIENTS = [
+    ['name' => 'Maria Nabil', 'address' => 'marianabil2711@instapay', 'qr' => 'maria.jpeg',
+        'url' => 'https://ipn.eg/C/Q/marianabil2711/instapay?ISIGN=23052603MEUCIH0aqFMdPtnqwthntNY7aza0WIgt/0tko3YCtXrZmfu8AiEAu9V9Q8GtzC6wNRrskv0cuGP33Ka2omSNllUu35UPpA0='],
+    ['name' => 'Monica Nabil', 'address' => 'monicanabil98@instapay', 'qr' => 'monica.jpeg',
+        'url' => 'https://ipn.eg/C/Q/monicanabil98/instapay?ISIGN=23052602MEYCIQCreltVhAlWTpgMbQ/TxX23oNwSDSLQcXXcAPMGfgy9zQIhAOq6c2j+LyipweCa0SiZD2wrTpIF9WOzMsZZpG0SWt27'],
+];
 const BOOKING_WHATSAPP = '0128 9921193';
 const BOOKING_WHATSAPP_URL = 'https://wa.me/201289921193';
 
@@ -41,7 +46,7 @@ function publicBookingSnapshot(PDO $pdo, int $performanceId, string $browserToke
     return ['revision' => hash('sha256', json_encode($seats, JSON_THROW_ON_ERROR)), 'seats' => (object) $seats];
 }
 
-function submitPublicBooking(PDO $pdo, int $performanceId, string $browserToken, array $input): void
+function submitPublicBooking(PDO $pdo, string $browserToken, array $input): void
 {
     $csrf = $input['csrf_token'] ?? '';
     if (!is_string($csrf) || !hash_equals(hash_hmac('sha256', 'submit-booking', $browserToken), $csrf)) {
@@ -55,48 +60,35 @@ function submitPublicBooking(PDO $pdo, int $performanceId, string $browserToken,
         throw new InvalidArgumentException('Please reopen the booking form and try again.');
     }
     // Public callers cannot set approval, collector, balance, ticket, or discount fields.
+    $basket = inputSeatBasket($input);
     $data = reservationInput([
         'customer_name' => $input['customer_name'] ?? '', 'customer_phone' => $input['customer_phone'] ?? '',
-        'seat_codes' => $input['seat_codes'] ?? '', 'is_paid' => '1',
+        'seat_codes' => implode(',', reset($basket)), 'is_paid' => '1',
     ], true);
     if (!preg_match('/\A\+?[0-9][0-9\s()-]{6,19}\z/', $data['customer_phone'])) {
         throw new InvalidArgumentException('Enter a valid phone number.');
     }
-    $requestHash = hash_hmac('sha256', $performanceId . ':' . $requestKey, $browserToken);
+    $notes = $input['notes'] ?? '';
+    if (!is_string($notes) || mb_strlen($notes) > 2000) {
+        throw new InvalidArgumentException('Keep your comments within 2,000 characters.');
+    }
+    $data['notes'] = trim($notes);
+    reserveSeatBasket($pdo, $basket, $data, null, $browserToken, $requestKey);
+}
+
+function publicCalendarSnapshot(PDO $pdo, string $browserToken): array
+{
+    $calendar = [];
     $pdo->beginTransaction();
     try {
-        $lock = $pdo->prepare('SELECT id FROM performances WHERE id = ? FOR UPDATE');
-        $lock->execute([$performanceId]);
-        if (!$lock->fetchColumn()) {
-            throw new InvalidArgumentException('Performance not found.');
-        }
-        $existing = $pdo->prepare('SELECT id FROM reservations WHERE request_key_hash = ?');
-        $existing->execute([$requestHash]);
-        if ($existing->fetchColumn()) {
-            $pdo->commit();
-            return;
-        }
-        $conflicts = unavailableSeats($pdo, $performanceId, $data['seat_codes']);
-        if ($conflicts) {
-            throw new SeatConflictException($conflicts);
-        }
-        $stmt = $pdo->prepare("INSERT INTO reservations
-            (performance_id, customer_name, customer_phone, approval_status, notes, browser_token_hash, request_key_hash)
-            VALUES (?, ?, ?, 'pending', ?, ?, ?)");
-        $stmt->execute([$performanceId, $data['customer_name'], $data['customer_phone'],
-            'Customer reports Instapay payment. Verify the WhatsApp payment screenshot before approval.',
-            hash('sha256', $browserToken), $requestHash]);
-        $id = (int) $pdo->lastInsertId();
-        $stmt = $pdo->prepare('INSERT INTO reservation_seats (reservation_id, performance_id, seat_code) VALUES (?, ?, ?)');
-        foreach ($data['seat_codes'] as $code) {
-            $stmt->execute([$id, $performanceId, $code]);
+        foreach (PERFORMANCE_DATES as $day => $label) {
+            $calendar[$day] = publicBookingSnapshot($pdo, performanceId($pdo, $day), $browserToken);
         }
         $pdo->commit();
     } catch (Throwable $error) {
         if ($pdo->inTransaction()) $pdo->rollBack();
-        if ($error instanceof PDOException && (int) ($error->errorInfo[1] ?? 0) === 1062) {
-            throw new SeatConflictException(unavailableSeats($pdo, $performanceId, $data['seat_codes']) ?: $data['seat_codes']);
-        }
         throw $error;
     }
+    return ['calendar' => $calendar,
+        'revision' => hash('sha256', json_encode(array_column($calendar, 'revision'), JSON_THROW_ON_ERROR))];
 }

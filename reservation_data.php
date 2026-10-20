@@ -10,8 +10,11 @@ if (!isset($allReservations, $approvedReservations, $pendingReservations, $reser
             $totalSeatsReserved = count($reservedSeats);
             $totalRemaining = array_sum(array_column($approvedReservations, 'remaining_amount'));
             $collectedData = calculateTotalCollected($approvedReservations);
+            $searchableApprovedReservations = array_filter($calendarReservations ?: $allReservations,
+                fn($row) => $row['approval_status'] === 'approved');
             ?>
 
+            <div data-daily-overview>
             <p class="reservation-scope">Main Theatre and Balcony reservations &middot; <?php echo PERFORMANCE_DATES[$selectedDay]; ?></p>
             <div class="stats-container">
                 <div class="stat-card">
@@ -77,100 +80,26 @@ if (!isset($allReservations, $approvedReservations, $pendingReservations, $reser
             </div>
             <?php endif; ?>
 
-            <?php if (count($pendingReservations) > 0): ?>
-                <!-- Pending Reservations Section -->
-                <div class="pending-section">
-                    <p class="booking-help">Verify the WhatsApp payment screenshot before approving a customer request. Unapproved requests are automatically removed after 12 hours.</p>
-                    <h2>⏳ Pending Reservations Awaiting Approval</h2>
-                    <div class="reservations-container">
-                        <table class="reservations-table">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Customer Name</th>
-                                    <th>Phone Number</th>
-                                    <th>Area</th>
-                                    <th>Reserved Seats</th>
-                                    <th>Payment</th>
-                                    <th>Comment</th>
-                                    <th>Created At</th>
-                                    <th>Expires At</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($pendingReservations as $reservation): ?>
-                                    <tr class="<?php echo isset($reservation['tickets_received']) && $reservation['tickets_received'] == 1 ? 'ticket-received' : ''; ?>">
-                                        <td><strong>#<?php echo htmlspecialchars($reservation['id']); ?></strong></td>
-                                        <td><?php echo htmlspecialchars($reservation['customer_name']); ?></td>
-                                        <td><?php echo htmlspecialchars($reservation['customer_phone']); ?></td>
-                                        <td><?php echo htmlspecialchars($reservation['area_label'], ENT_QUOTES, 'UTF-8'); ?></td>
-                                        <td>
-                                            <div class="seats-cell">
-                                                <?php 
-                                                $seats = explode(',', $reservation['seat_codes']);
-                                                foreach ($seats as $seat): 
-                                                ?>
-                                                    <span class="seat-badge"><?php echo trim(htmlspecialchars($seat)); ?></span>
-                                                <?php endforeach; ?>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <span class="remaining-amount <?php echo $reservation['remaining_amount'] == 0 ? 'remaining-paid' : ''; ?>">
-                                                <?php if ($reservation['remaining_amount'] == 0): ?>
-                                                    Reported paid
-                                                <?php else: ?>
-                                                    EGP <?php echo number_format($reservation['remaining_amount'], 2); ?>
-                                                <?php endif; ?>
-                                            </span>
-                                        </td>
-                                        <td>
-                                            <div class="comment-cell">
-                                                <?php echo !empty($reservation['notes']) ? htmlspecialchars($reservation['notes']) : '<em>No comment</em>'; ?>
-                                            </div>
-                                        </td>
-                                        <td><?php echo date('M d, Y H:i', strtotime($reservation['created_at'])); ?></td>
-                                        <td><?php echo date('M d, Y H:i', strtotime($reservation['expires_at'])); ?></td>
-                                        <td>
-                                            <div class="action-buttons">
-                                                <form method="POST" action="" style="display: inline;">
-                                                    <input type="hidden" name="action" value="approve">
-                                                    <input type="hidden" name="day" value="<?php echo $selectedDay; ?>">
-                                                    <input type="hidden" name="area" value="<?php echo $selectedArea; ?>">
-                                                    <input type="hidden" name="id" value="<?php echo $reservation['id']; ?>">
-                                                    <button type="submit" class="btn-edit btn-approve" onclick="return confirm('Approve this reservation?')">Approve</button>
-                                                </form>
-                                                <form method="POST" action="" style="display: inline;">
-                                                    <input type="hidden" name="action" value="reject">
-                                                    <input type="hidden" name="day" value="<?php echo $selectedDay; ?>">
-                                                    <input type="hidden" name="area" value="<?php echo $selectedArea; ?>">
-                                                    <input type="hidden" name="id" value="<?php echo $reservation['id']; ?>">
-                                                    <button type="submit" class="btn-delete btn-reject" onclick="return confirm('Reject and delete this reservation?')">Reject</button>
-                                                </form>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            <?php endif; ?>
+            </div>
+            <?php require __DIR__ . '/pending_bookings.php'; ?>
 
             <!-- Approved Reservations Section -->
 
-            <div class="reservations-container">
-                <?php if ($totalReservations > 0): ?>
+            <h2 class="confirmed-reservations-title">Confirmed reservations <span data-confirmed-scope><?php echo PERFORMANCE_DATES[$selectedDay]; ?></span></h2>
+            <div class="reservations-container" data-confirmed-results <?php if (!$totalReservations): ?>hidden<?php endif; ?>>
+                <?php if ($searchableApprovedReservations): ?>
                     <table class="reservations-table">
                         <thead>
                             <tr>
                                 <th>ID</th>
+                                <th>Date</th>
                                 <th>Customer Name</th>
                                 <th>Phone Number</th>
                                 <th>Area</th>
                                 <th>Reserved Seats</th>
                                 <th>Remaining Amount</th>
                                 <th>Reserved By</th>
+                                <th>Comments</th>
                                 <th>Created At</th>
 
                                     <th>Actions</th>
@@ -178,9 +107,13 @@ if (!isset($allReservations, $approvedReservations, $pendingReservations, $reser
                             </tr>
                         </thead>
                         <tbody>
-                            <?php foreach ($approvedReservations as $reservation): ?>
-                                <tr class="<?php echo isset($reservation['tickets_received']) && $reservation['tickets_received'] == 1 ? 'ticket-received' : ''; ?>">
+                            <?php foreach ($searchableApprovedReservations as $reservation): ?>
+                                <tr data-confirmed-reservation data-performance-date="<?php echo $reservation['performance_date']; ?>"
+                                    data-search-records="<?php echo htmlspecialchars(json_encode([['name' => $reservation['customer_name'], 'phone' => $reservation['customer_phone']]]), ENT_QUOTES, 'UTF-8'); ?>"
+                                    <?php if ($reservation['performance_date'] !== $selectedDay): ?>hidden<?php endif; ?>
+                                    class="<?php echo isset($reservation['tickets_received']) && $reservation['tickets_received'] == 1 ? 'ticket-received' : ''; ?>">
                                     <td><strong>#<?php echo htmlspecialchars($reservation['id']); ?></strong></td>
+                                    <td><?php echo PERFORMANCE_DATES[$reservation['performance_date']]; ?></td>
                                     <td><?php echo htmlspecialchars($reservation['customer_name']); ?></td>
                                     <td><?php echo htmlspecialchars($reservation['customer_phone']); ?></td>
                                     <td><?php echo htmlspecialchars($reservation['area_label'], ENT_QUOTES, 'UTF-8'); ?></td>
@@ -206,12 +139,13 @@ if (!isset($allReservations, $approvedReservations, $pendingReservations, $reser
                                     <td>
                                         <?php echo !empty($reservation['reserved_by_name']) ? htmlspecialchars($reservation['reserved_by_name']) : '<em>N/A</em>'; ?>
                                     </td>
+                                    <td><div class="comment-cell"><?php echo !empty($reservation['notes']) ? nl2br(htmlspecialchars($reservation['notes'], ENT_QUOTES, 'UTF-8')) : '<em>No comment</em>'; ?></div></td>
                                     <td><?php echo date('M d, Y H:i', strtotime($reservation['created_at'])); ?></td>
 
                                         <td>
                                             <div class="action-buttons">
                                                 <button class="btn-edit" onclick="openEditModal(<?php echo htmlspecialchars(json_encode($reservation), ENT_QUOTES, 'UTF-8'); ?>)">Edit</button>
-                                                <button class="btn-delete" onclick="confirmDelete(<?php echo $reservation['id']; ?>)">Delete</button>
+                                                <button class="btn-delete" onclick="confirmDelete(<?php echo $reservation['id']; ?>, '<?php echo $reservation['performance_date']; ?>')">Delete</button>
                                             </div>
                                         </td>
 
@@ -219,9 +153,6 @@ if (!isset($allReservations, $approvedReservations, $pendingReservations, $reser
                             <?php endforeach; ?>
                         </tbody>
                     </table>
-                <?php else: ?>
-                    <div class="no-reservations">
-                        <p>No reservations found for this day.</p>
-                    </div>
                 <?php endif; ?>
             </div>
+            <p class="no-reservations" data-confirmed-empty <?php if ($totalReservations): ?>hidden<?php endif; ?>>No confirmed reservations found for this date.</p>

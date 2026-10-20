@@ -9,7 +9,11 @@ $renderMapSeat = static function (string $code, int $number, bool $blocked = fal
     $class = 'available';
     $title = 'Available - Click to reserve';
     $onclick = 'toggleSeat(this)';
-    if ($soundControl || $blocked) {
+    if (isVipSeat($code)) {
+        $class = 'vip';
+        $title = 'VIP - Not available for reservation';
+        $onclick = '';
+    } elseif ($soundControl || $blocked) {
         $class = $soundControl ? 'sound-control' : 'blocked';
         $title = $soundControl ? 'Sound Control' : 'Blocked';
         $onclick = '';

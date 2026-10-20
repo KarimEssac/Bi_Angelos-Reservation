@@ -26,6 +26,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - ثورة الموتى - Bi Angelos Theatre</title>
     <link rel="icon" type="image/jpeg" href="logo.jpg">
+    <link rel="stylesheet" href="mobile-inputs.css?v=<?php echo filemtime(__DIR__ . '/mobile-inputs.css'); ?>">
+    <link rel="stylesheet" href="scrollbars.css?v=<?php echo filemtime(__DIR__ . '/scrollbars.css'); ?>">
     <style>
         * {
             margin: 0;

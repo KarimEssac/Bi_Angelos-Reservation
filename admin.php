@@ -36,7 +36,18 @@ expireReservations($pdo);
 $error = '';
 if ($isPost) {
     try {
-        $result = performReservationAction($pdo, $performanceId, (int) $admin['id'], $_POST);
+        if (($_POST['action'] ?? '') === 'reserve') {
+            $basket = inputSeatBasket($_POST);
+            $fields = $_POST;
+            $fields['seat_codes'] = implode(',', reset($basket));
+            reserveSeatBasket($pdo, $basket, reservationInput($fields, true), (int) $admin['id']);
+            $result = 'success';
+        } elseif (($_POST['action'] ?? '') === 'approve_batch') {
+            approveReservationBatch($pdo, (int) $admin['id'], $_POST['reservation_ids'] ?? []);
+            $result = 'approved';
+        } else {
+            $result = performReservationAction($pdo, $performanceId, (int) $admin['id'], $_POST);
+        }
         $tab = $result === 'success' ? 'map' : 'reservations';
         $redirect = 'admoonzz?day=' . $selectedDay . '&area=' . $selectedArea . '&tab=' . $tab . '&' . $result . '=1';
         if ($jsonRequest) {
@@ -69,7 +80,8 @@ if ($isPost) {
         }
     }
 }
-$snapshot = reservationSnapshot($pdo, $performanceId);
+$calendarSnapshot = reservationCalendarSnapshot($pdo, $selectedArea);
+$snapshot = $calendarSnapshot['calendar'][$selectedDay];
 $allReservations = $snapshot['reservations'];
 ?>
 <!DOCTYPE html>
@@ -79,6 +91,8 @@ $allReservations = $snapshot['reservations'];
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ثورة الموتى - Bi Angelos Theatre</title>
     <link rel="icon" type="image/jpeg" href="logo.jpg">
+    <link rel="stylesheet" href="mobile-inputs.css?v=<?php echo filemtime(__DIR__ . '/mobile-inputs.css'); ?>">
+    <link rel="stylesheet" href="scrollbars.css?v=<?php echo filemtime(__DIR__ . '/scrollbars.css'); ?>">
     <link rel="stylesheet" href="styles.css?v=<?php echo filemtime(__DIR__ . '/styles.css'); ?>">
 </head>
 <body>
@@ -151,7 +165,7 @@ $allReservations = $snapshot['reservations'];
 
         <?php if (isset($_GET['approved'])): ?>
             <div class="success-message">
-                Reservation approved successfully!
+                Selected reservations approved successfully!
             </div>
         <?php endif; ?>
 
@@ -193,6 +207,10 @@ $allReservations = $snapshot['reservations'];
                         <span>Blocked</span>
                     </div>
                     <div class="legend-item">
+                        <span class="legend-box vip"></span>
+                        <span>VIP (unavailable)</span>
+                    </div>
+                    <div class="legend-item">
                         <span class="legend-box selected"></span>
                         <span>Selected</span>
                     </div>
@@ -211,8 +229,17 @@ $allReservations = $snapshot['reservations'];
         </div>
 
         <!-- Reservations Data Tab -->
-        <div id="reservationDataPanel" class="tab-content <?php echo $selectedTab === 'reservations' ? 'active' : ''; ?>">
-            <?php echo renderReservationData($allReservations, $selectedDay, $selectedArea); ?>
+        <div class="tab-content reservation-data-view <?php echo $selectedTab === 'reservations' ? 'active' : ''; ?>">
+            <div class="reservation-search">
+                <div class="reservation-search-field">
+                    <label for="reservationSearch">Search reservations</label>
+                    <input type="search" id="reservationSearch" placeholder="Search by name or phone number" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="reservationSearchHelp reservationSearchStatus">
+                </div>
+                <button type="button" id="clearReservationSearch" disabled>Clear search</button>
+                <p id="reservationSearchHelp">Search pending and confirmed reservations across both dates.</p>
+                <p id="reservationSearchStatus" role="status" aria-live="polite"></p>
+            </div>
+            <div id="reservationDataPanel"><?php echo $snapshot['reservations_html']; ?></div>
         </div>
     </div>
 
@@ -245,6 +272,7 @@ $allReservations = $snapshot['reservations'];
                 <input type="hidden" name="day" value="<?php echo $selectedDay; ?>">
                 <input type="hidden" name="area" value="<?php echo $selectedArea; ?>">
                 <input type="hidden" name="seat_codes" id="selectedSeatsInput">
+                <input type="hidden" name="seat_basket" id="seatBasketInput">
                 
                 <div class="selected-seats-display">
                     <h3>Selected Seats:</h3>
@@ -366,7 +394,7 @@ $allReservations = $snapshot['reservations'];
     </form>
 
 
-    <script id="theatre-state" type="application/json"><?php echo json_encode(['day' => $selectedDay, 'area' => $selectedArea, 'day_label' => PERFORMANCE_DATES[$selectedDay], 'prices' => TICKET_PRICES] + $snapshot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR); ?></script>
+    <script id="theatre-state" type="application/json"><?php echo json_encode(['day' => $selectedDay, 'area' => $selectedArea, 'day_label' => PERFORMANCE_DATES[$selectedDay], 'days' => PERFORMANCE_DATES, 'prices' => TICKET_PRICES] + $calendarSnapshot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR); ?></script>
     <script src="app.js?v=<?php echo filemtime(__DIR__ . '/app.js'); ?>"></script>
 </body>
 </html>
