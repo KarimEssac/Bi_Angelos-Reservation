@@ -20,11 +20,12 @@ try {
     if ($isPost) {
         if (($_POST['action'] ?? '') !== 'request') throw new InvalidArgumentException('Invalid booking request.');
         submitPublicBooking($pdo, $browserToken, $_POST);
-        echo json_encode(['ok' => true, 'redirect' => './?day=' . $selectedDay . '&area=' . $selectedArea . '&requested=1']);
+        echo json_encode(['ok' => true, 'redirect' => './?day=' . $selectedDay . '&area=' . $selectedArea . '&requested=1&request=' . $_POST['request_key']]);
         exit;
     }
     $calendarSnapshot = publicCalendarSnapshot($pdo, $browserToken);
     $snapshot = $calendarSnapshot['calendar'][$selectedDay];
+    $receiptRecipient = isset($_GET['requested']) ? paymentReceiptRecipient($pdo, $browserToken, $_GET['request'] ?? null) : null;
 } catch (Throwable $error) {
     $status = $error instanceof SeatConflictException ? 409 : ($error instanceof InvalidArgumentException ? 400 : 500);
     http_response_code($status);
@@ -32,7 +33,10 @@ try {
     if ($status === 500) error_log('Public booking failed: ' . $error->getMessage());
     if ($isPost) {
         $response = ['error' => $message];
-        if ($error instanceof SeatConflictException) $response['unavailable_seats'] = $error->seatCodes;
+        if ($error instanceof SeatConflictException) {
+            $response['unavailable_seats'] = $error->seatCodes;
+            $response['hold_expired'] = $error instanceof SeatHoldExpiredException;
+        }
         echo json_encode($response);
     } else {
         echo htmlspecialchars($message, ENT_QUOTES, 'UTF-8');
@@ -85,13 +89,14 @@ $publicView = true;
         </div>
         <p id="liveNotice" class="live-notice" role="status" hidden></p>
         <?php if (isset($_GET['requested'])): ?>
-            <div class="success-message" role="status">Your request was submitted. Follow your seats on the map for their latest status. Send your payment screenshot and booking name to <a href="<?php echo BOOKING_WHATSAPP_URL; ?>" target="_blank" rel="noopener noreferrer"><?php echo BOOKING_WHATSAPP; ?></a> on WhatsApp. Requests stay pending until approved and expire after a short period if unapproved.</div>
+            <div class="success-message" role="status">Your request was submitted. Follow your seats on the map for their latest status. <?php if ($receiptRecipient): ?>Send your payment screenshot and booking name using <a href="<?php echo $receiptRecipient['whatsapp_url']; ?>" target="_blank" rel="noopener noreferrer">click here to go to whatsapp</a>.<?php endif; ?> Requests stay pending until approved and expire after a short period if unapproved.</div>
         <?php endif; ?>
         <div class="legend">
             <div class="legend-items">
                 <div class="legend-item"><span class="legend-box available"></span><span>Available</span></div>
                 <div class="legend-item"><span class="legend-box reserved"></span><span>Reserved</span></div>
                 <div class="legend-item"><span class="legend-box pending"></span><span>Pending confirmation</span></div>
+                <div class="legend-item"><span class="legend-box on-hold"></span><span>On hold</span></div>
                 <div class="legend-item"><span class="legend-box selected"></span><span>Selected</span></div>
                 <div class="legend-item"><span class="legend-own-seats" aria-hidden="true"><span class="legend-box pending own-seat"></span><span class="legend-box reserved own-seat"></span></span><span>Your seats</span></div>
                 <div class="legend-item"><span class="legend-box blocked" style="background:#000"></span><span>Unavailable</span></div>
@@ -138,6 +143,12 @@ $publicView = true;
                     <input type="hidden" name="csrf_token" value="<?php echo hash_hmac('sha256', 'submit-booking', $browserToken); ?>">
                     <input type="hidden" name="request_key" value="<?php echo bin2hex(random_bytes(16)); ?>">
                     <input type="hidden" name="payment_acknowledged" id="paymentAcknowledged" value="0">
+                    <input type="hidden" name="payment_recipient" id="paymentRecipient" value="">
+                    <input type="hidden" name="payment_assignment" id="paymentAssignment" value="">
+                    <input type="hidden" name="hold_key" id="seatHoldKey" value="">
+                    <p id="seatHoldStatus" class="booking-help" role="status" hidden></p>
+                    <p id="paymentAssignmentStatus" class="booking-help" role="status" hidden></p>
+                    <button type="button" id="retryPaymentAssignment" class="booking-back" hidden>Retry loading payment details</button>
                     <div class="selected-seats-display">
                         <h3>Selected Seats:</h3><div class="selected-seats-list" id="selectedSeatsList"></div>
                     </div>
@@ -151,7 +162,7 @@ $publicView = true;
                             <label for="phone_number">Phone number *</label>
                             <input type="tel" id="phone_number" name="customer_phone" maxlength="20" autocomplete="tel" required>
                         </div>
-                        <p class="booking-help">You can choose seats from both dates and both seating areas in one booking. Seats are held only after the final confirmation.</p>
+                        <p class="booking-help">Your seats are on hold while this window is open. Closing it releases the hold. You can choose seats from both dates and both seating areas in one booking.</p>
                         <button type="button" class="submit-btn continue-btn" data-step-forward="2">Continue</button>
                     </section>
                     <section data-booking-step="2" hidden>
@@ -183,7 +194,7 @@ $publicView = true;
             </div>
         </div>
     </div>
-    <script id="theatre-state" type="application/json"><?php echo json_encode(['public' => true, 'day' => $selectedDay, 'area' => $selectedArea, 'day_label' => PERFORMANCE_DATES[$selectedDay], 'days' => PERFORMANCE_DATES, 'prices' => TICKET_PRICES, 'live_url' => 'public_live.php', 'submit_url' => './', 'whatsapp_url' => BOOKING_WHATSAPP_URL] + $calendarSnapshot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR); ?></script>
+    <script id="theatre-state" type="application/json"><?php echo json_encode(['public' => true, 'day' => $selectedDay, 'area' => $selectedArea, 'day_label' => PERFORMANCE_DATES[$selectedDay], 'days' => PERFORMANCE_DATES, 'prices' => TICKET_PRICES, 'live_url' => 'public_live.php', 'submit_url' => './', 'payment_url' => 'public_payment.php'] + $calendarSnapshot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR); ?></script>
     <script src="app.js?v=<?php echo filemtime(__DIR__ . '/app.js'); ?>"></script>
 </body>
 </html>

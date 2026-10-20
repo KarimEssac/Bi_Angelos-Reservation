@@ -36,6 +36,20 @@ function currentAdmin(PDO $pdo): ?array
     return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 }
 
+function adminSeatHoldOwner(mixed $holdKey): string
+{
+    return seatHoldOwner('admin:' . $_COOKIE['admin_session'], validateSeatHoldKey($holdKey));
+}
+
+function validateAdminSeatHold(array $input): string
+{
+    $csrf = $input['csrf_token'] ?? '';
+    if (!is_string($csrf) || !hash_equals(hash_hmac('sha256', 'admin-seat-hold', $_COOKIE['admin_session']), $csrf)) {
+        throw new InvalidArgumentException('Reopen the admin page and try again.');
+    }
+    return adminSeatHoldOwner($input['hold_key'] ?? null);
+}
+
 function loginAdmin(PDO $pdo, string $email, string $password): bool
 {
     $stmt = $pdo->prepare('SELECT id, password FROM admins WHERE email = ?');

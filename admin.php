@@ -40,7 +40,8 @@ if ($isPost) {
             $basket = inputSeatBasket($_POST);
             $fields = $_POST;
             $fields['seat_codes'] = implode(',', reset($basket));
-            reserveSeatBasket($pdo, $basket, reservationInput($fields, true), (int) $admin['id']);
+            reserveSeatBasket($pdo, $basket, reservationInput($fields, true), (int) $admin['id'],
+                null, null, validateAdminSeatHold($_POST));
             $result = 'success';
         } elseif (($_POST['action'] ?? '') === 'approve_batch') {
             approveReservationBatch($pdo, (int) $admin['id'], $_POST['reservation_ids'] ?? []);
@@ -60,7 +61,8 @@ if ($isPost) {
         http_response_code(409);
         $error = $e->getMessage();
         if ($jsonRequest) {
-            echo json_encode(['error' => $error, 'unavailable_seats' => $e->seatCodes]);
+            echo json_encode(['error' => $error, 'unavailable_seats' => $e->seatCodes,
+                'hold_expired' => $e instanceof SeatHoldExpiredException]);
             exit;
         }
     } catch (InvalidArgumentException $e) {
@@ -182,6 +184,7 @@ $allReservations = $snapshot['reservations'];
         <div class="tab-content <?php echo $selectedTab === 'map' ? 'active' : ''; ?>">
             <div class="legend">
                 <div class="legend-items">
+                    <div class="legend-item"><span class="legend-box on-hold"></span><span>On hold</span></div>
                     <div class="legend-item">
                         <span class="legend-box available"></span>
                         <span>Available</span>
@@ -273,6 +276,10 @@ $allReservations = $snapshot['reservations'];
                 <input type="hidden" name="area" value="<?php echo $selectedArea; ?>">
                 <input type="hidden" name="seat_codes" id="selectedSeatsInput">
                 <input type="hidden" name="seat_basket" id="seatBasketInput">
+                <input type="hidden" name="csrf_token" value="<?php echo hash_hmac('sha256', 'admin-seat-hold', $_COOKIE['admin_session']); ?>">
+                <input type="hidden" name="request_key" value="<?php echo bin2hex(random_bytes(16)); ?>">
+                <input type="hidden" name="hold_key" id="seatHoldKey" value="">
+                <p id="seatHoldStatus" class="booking-help" role="status" hidden></p>
                 
                 <div class="selected-seats-display">
                     <h3>Selected Seats:</h3>

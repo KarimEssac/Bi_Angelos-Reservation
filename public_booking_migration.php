@@ -9,8 +9,15 @@ $pdo->exec('ALTER TABLE reservations
     ADD COLUMN IF NOT EXISTS browser_token_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin DEFAULT NULL,
     ADD COLUMN IF NOT EXISTS request_key_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin DEFAULT NULL,
     ADD COLUMN IF NOT EXISTS booking_group_key CHAR(32) CHARACTER SET ascii COLLATE ascii_bin DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS payment_recipient VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin DEFAULT NULL,
     ADD UNIQUE INDEX IF NOT EXISTS public_request_key (request_key_hash),
     ADD INDEX IF NOT EXISTS booking_group (booking_group_key)');
+$pdo->exec("CREATE TABLE IF NOT EXISTS payment_rotation (
+    id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+    next_recipient ENUM('maria', 'monica') NOT NULL DEFAULT 'maria',
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=ascii COLLATE=ascii_bin");
+$pdo->exec("INSERT IGNORE INTO payment_rotation (id, next_recipient) VALUES (1, 'maria')");
 $rows = $pdo->query('SELECT id, notes, browser_token_hash, reserved_by_admin_id, customer_name, customer_phone
     FROM reservations WHERE booking_group_key IS NULL')->fetchAll(PDO::FETCH_ASSOC);
 $update = $pdo->prepare('UPDATE reservations SET booking_group_key = ? WHERE id = ? AND booking_group_key IS NULL');

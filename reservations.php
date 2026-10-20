@@ -14,6 +14,8 @@ class SeatConflictException extends InvalidArgumentException
     }
 }
 
+require_once __DIR__ . '/seat_holds.php';
+
 function parseSeatBasket(string $json): array
 {
     try {
@@ -47,17 +49,17 @@ function inputSeatBasket(array $input): array
     return [$day => parseSeatCodes(is_string($input['seat_codes'] ?? null) ? $input['seat_codes'] : '')];
 }
 
-function basketConflictKeys(PDO $pdo, array $basket, array $performances): array
+function basketConflictKeys(PDO $pdo, array $basket, array $performances, ?string $holdOwner = null): array
 {
     $conflicts = [];
     foreach ($basket as $day => $codes) {
-        foreach (unavailableSeats($pdo, $performances[$day], $codes) as $code) $conflicts[] = $day . '|' . $code;
+        foreach (unavailableSeats($pdo, $performances[$day], $codes, null, $holdOwner) as $code) $conflicts[] = $day . '|' . $code;
     }
     return $conflicts;
 }
 
 function reserveSeatBasket(PDO $pdo, array $basket, array $data, ?int $adminId = null,
-    ?string $browserToken = null, ?string $requestKey = null): void
+    ?string $browserToken = null, ?string $requestKey = null, ?string $holdOwner = null): void
 {
     $performances = [];
     $prices = [];
@@ -68,6 +70,11 @@ function reserveSeatBasket(PDO $pdo, array $basket, array $data, ?int $adminId =
     }
     asort($performances, SORT_NUMERIC);
     $public = $browserToken !== null;
+    if ($public) $holdOwner = seatHoldOwner($browserToken, $data['hold_key']);
+    $paymentRecipient = $public ? ($data['payment_recipient'] ?? null) : null;
+    if ($public && !in_array($paymentRecipient, ['maria', 'monica'], true)) {
+        throw new InvalidArgumentException('Load your payment account before confirming the booking.');
+    }
     $hashes = [];
     if ($public) {
         foreach ($performances as $day => $id) $hashes[$day] = hash_hmac('sha256', $id . ':' . $requestKey, $browserToken);
@@ -92,8 +99,9 @@ function reserveSeatBasket(PDO $pdo, array $basket, array $data, ?int $adminId =
             }
             if ($found) throw new InvalidArgumentException('This request was already submitted. Reopen the booking page for a new request.');
         }
-        $conflicts = basketConflictKeys($pdo, $basket, $performances);
+        $conflicts = basketConflictKeys($pdo, $basket, $performances, $holdOwner);
         if ($conflicts) throw new SeatConflictException($conflicts);
+        if ($holdOwner !== null) requireSeatHold($pdo, $basket, $performances, $holdOwner);
         $remainingCents = (int) round((float) $data['remaining_amount'] * 100);
         $unallocated = $remainingCents;
         $total = array_sum($prices);
@@ -108,15 +116,25 @@ function reserveSeatBasket(PDO $pdo, array $basket, array $data, ?int $adminId =
             if ($public && ($data['notes'] ?? '') !== '') $notes = $data['notes'];
             $stmt = $pdo->prepare('INSERT INTO reservations
                 (performance_id, customer_name, customer_phone, remaining_amount, approval_status, notes,
-                    tickets_received, has_service_discount, reserved_by_admin_id, browser_token_hash, request_key_hash, booking_group_key)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                    tickets_received, has_service_discount, reserved_by_admin_id, browser_token_hash, request_key_hash, booking_group_key, payment_recipient)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
             $stmt->execute([$performances[$day], $data['customer_name'], $data['customer_phone'],
                 number_format($dayCents / 100, 2, '.', ''), $public ? 'pending' : 'approved', $notes ?: null,
                 $public ? 0 : $data['tickets_received'], $public ? 0 : $data['has_service_discount'], $public ? null : $adminId,
-                $public ? hash('sha256', $browserToken) : null, $hashes[$day] ?? null, $groupKey]);
+                $public ? hash('sha256', $browserToken) : null, $hashes[$day] ?? null, $groupKey, $paymentRecipient]);
             $reservationId = (int) $pdo->lastInsertId();
             $stmt = $pdo->prepare('INSERT INTO reservation_seats (reservation_id, performance_id, seat_code) VALUES (?, ?, ?)');
             foreach ($codes as $code) $stmt->execute([$reservationId, $performances[$day], $code]);
+        }
+        if ($holdOwner !== null) {
+            $release = $pdo->prepare('DELETE FROM seat_holds WHERE owner_hash = ?');
+            $release->execute([$holdOwner]);
+        }
+        if ($public) {
+            // Advance once per checkout, only after every date has been saved successfully.
+            // Use the account the customer saw, even if another checkout completed meanwhile.
+            $rotate = $pdo->prepare('UPDATE payment_rotation SET next_recipient = ? WHERE id = 1');
+            $rotate->execute([$paymentRecipient === 'maria' ? 'monica' : 'maria']);
         }
         $pdo->commit();
     } catch (Throwable $error) {
@@ -223,12 +241,12 @@ function approveReservationBatch(PDO $pdo, int $adminId, mixed $input): int
     return count($ids);
 }
 
-function reservationCalendarSnapshot(PDO $pdo, string $area, bool $includeHtml = true): array
+function reservationCalendarSnapshot(PDO $pdo, string $area, bool $includeHtml = true, ?string $holdOwner = null): array
 {
     $calendar = [];
     $pdo->beginTransaction();
     try {
-        foreach (PERFORMANCE_DATES as $day => $label) $calendar[$day] = reservationSnapshot($pdo, performanceId($pdo, $day));
+        foreach (PERFORMANCE_DATES as $day => $label) $calendar[$day] = reservationSnapshot($pdo, performanceId($pdo, $day), $holdOwner);
         $pdo->commit();
     } catch (Throwable $error) {
         if ($pdo->inTransaction()) $pdo->rollBack();
@@ -252,7 +270,7 @@ function unavailableCalendarSeats(array $calendar, array $basket): array
     return $unavailable;
 }
 
-function unavailableSeats(PDO $pdo, int $performanceId, array $codes, ?int $exceptReservationId = null): array
+function unavailableSeats(PDO $pdo, int $performanceId, array $codes, ?int $exceptReservationId = null, ?string $holdOwner = null): array
 {
     if (!$codes) {
         return [];
@@ -266,7 +284,12 @@ function unavailableSeats(PDO $pdo, int $performanceId, array $codes, ?int $exce
     }
     $stmt = $pdo->prepare($sql . ' ORDER BY seat_code');
     $stmt->execute($parameters);
-    return $stmt->fetchAll(PDO::FETCH_COLUMN);
+    $unavailable = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    $holds = seatHoldSnapshot($pdo, $performanceId, $holdOwner);
+    foreach ($codes as $code) {
+        if (isset($holds[$code]) && !$holds[$code]['hold_mine']) $unavailable[] = $code;
+    }
+    return array_values(array_unique($unavailable));
 }
 
 function performanceId(PDO $pdo, string $date): int
@@ -300,7 +323,7 @@ function listReservations(PDO $pdo, int $performanceId): array
     try {
         $stmt = $pdo->prepare('SELECT r.id, r.performance_id, r.customer_name, r.customer_phone,
             r.remaining_amount, r.approval_status, r.notes, r.tickets_received, r.has_service_discount,
-            r.reserved_by_admin_id, r.created_at, r.booking_group_key, p.performance_date, a.name AS reserved_by_name,
+            r.reserved_by_admin_id, r.created_at, r.booking_group_key, r.payment_recipient, p.performance_date, a.name AS reserved_by_name,
             CASE WHEN r.approval_status = \'pending\' THEN DATE_ADD(r.created_at, INTERVAL 12 HOUR) ELSE NULL END AS expires_at
             FROM reservations r JOIN performances p ON p.id = r.performance_id
             LEFT JOIN admins a ON a.id = r.reserved_by_admin_id
@@ -331,7 +354,7 @@ function listReservations(PDO $pdo, int $performanceId): array
     }
 }
 
-function reservationSnapshot(PDO $pdo, int $performanceId): array
+function reservationSnapshot(PDO $pdo, int $performanceId, ?string $holdOwner = null): array
 {
     $reservations = listReservations($pdo, $performanceId);
     $seats = [];
@@ -345,7 +368,8 @@ function reservationSnapshot(PDO $pdo, int $performanceId): array
             ];
         }
     }
-    return ['revision' => hash('sha256', json_encode($reservations, JSON_THROW_ON_ERROR)),
+    $seats += seatHoldSnapshot($pdo, $performanceId, $holdOwner);
+    return ['revision' => hash('sha256', json_encode([$reservations, $seats], JSON_THROW_ON_ERROR)),
         'reservations' => $reservations, 'seats' => (object) $seats];
 }
 

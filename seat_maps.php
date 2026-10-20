@@ -17,6 +17,10 @@ $renderMapSeat = static function (string $code, int $number, bool $blocked = fal
         $class = $soundControl ? 'sound-control' : 'blocked';
         $title = $soundControl ? 'Sound Control' : 'Blocked';
         $onclick = '';
+    } elseif (!empty($booking['on_hold'])) {
+        $class = 'on-hold';
+        $title = 'On hold - Someone is completing a reservation';
+        $onclick = '';
     } elseif ($booking) {
         $class = $booking['pending'] ? 'pending' : ($booking['remaining_amount'] > 0 ? 'reserved-unpaid' : 'reserved');
         $title = $booking['pending'] ? 'Pending confirmation' : 'Reserved';

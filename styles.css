@@ -1381,6 +1381,16 @@
     font-weight: 700 !important;
 }
 
+.reservation-total-amount {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 6px;
+    background: #fff0bf;
+    color: #8a4100;
+    font-size: 1.2em;
+    font-weight: 800;
+}
+
 .khedma-price-info {
     margin-bottom: 18px;
     padding: 10px 12px;
@@ -1541,7 +1551,10 @@
 .payment-details p:last-child, .confirmation-summary p:last-child { margin-bottom: 0; }
 .instapay-account { padding: 12px; font-weight: 700; overflow-wrap: anywhere; background: #eaf4fb; border-radius: 6px; }
 .instapay-placeholder { padding: 12px; border: 1px dashed #b4c9d8; border-radius: 6px; color: #536a7b; }
-.instapay-recipients { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.seat.on-hold, .legend-box.on-hold { background: #00d7ed; color: #083c45; border: 1px solid #009db2; }
+.seat.on-hold { cursor: not-allowed; }
+.seat.on-hold:hover { background: #00d7ed; transform: none; }
+.instapay-recipients { display: grid; grid-template-columns: minmax(0, 1fr); max-width: 320px; margin: 16px auto; }
 .instapay-recipient { min-width: 0; padding: 12px; border: 1px solid #dce7ef; border-radius: 8px; background: white; text-align: center; }
 .instapay-recipient h4 { color: #207FBD; margin-bottom: 8px; }
 .instapay-qr { display: block; width: 100%; max-width: 260px; height: auto; margin: 0 auto 8px; }

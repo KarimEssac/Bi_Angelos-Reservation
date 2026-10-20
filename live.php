@@ -28,7 +28,8 @@ try {
     }
     $checkedSeats = isset($_GET['seats']) ? parseSeatCodes(is_string($_GET['seats']) ? $_GET['seats'] : '') : null;
     expireReservations($pdo);
-    $snapshot = reservationCalendarSnapshot($pdo, $area, false);
+    $holdOwner = isset($_GET['hold_key']) ? adminSeatHoldOwner($_GET['hold_key']) : null;
+    $snapshot = reservationCalendarSnapshot($pdo, $area, false, $holdOwner);
     $changed = !is_string($_GET['revision'] ?? null) || $_GET['revision'] !== $snapshot['revision'];
     $response = ['authenticated' => true, 'day' => $day, 'area' => $area, 'revision' => $snapshot['revision'], 'changed' => $changed];
     if ($changed) {
@@ -43,7 +44,10 @@ try {
         $response['reservations_html'] = $snapshot['calendar'][$day]['reservations_html'];
     }
     if ($checkedSeats !== null) {
-        $response['unavailable_seats'] = array_values(array_filter($checkedSeats, fn($code) => isset($snapshot['calendar'][$day]['seats']->$code)));
+        $response['unavailable_seats'] = array_values(array_filter($checkedSeats, function ($code) use ($snapshot, $day) {
+            $seat = $snapshot['calendar'][$day]['seats']->$code ?? null;
+            return $seat && empty($seat['hold_mine']);
+        }));
     }
     echo json_encode($response, JSON_THROW_ON_ERROR);
 } catch (InvalidArgumentException $error) {

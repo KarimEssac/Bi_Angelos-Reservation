@@ -13,7 +13,8 @@ try {
     $performance = performanceId($pdo, $day);
     $codes = isset($_GET['seats']) ? parseSeatCodes(is_string($_GET['seats']) ? $_GET['seats'] : '') : null;
     expireReservations($pdo);
-    $snapshot = publicCalendarSnapshot($pdo, $token);
+    $holdKey = isset($_GET['hold_key']) ? validateSeatHoldKey($_GET['hold_key']) : null;
+    $snapshot = publicCalendarSnapshot($pdo, $token, $holdKey);
     $changed = !is_string($_GET['revision'] ?? null) || $_GET['revision'] !== $snapshot['revision'];
     $response = ['day' => $day, 'area' => $area, 'revision' => $snapshot['revision'], 'changed' => $changed];
     if ($changed) {
@@ -21,7 +22,10 @@ try {
         $response['seats'] = $snapshot['calendar'][$day]['seats'];
     }
     if ($codes !== null) {
-        $response['unavailable_seats'] = array_values(array_filter($codes, fn($code) => isset($snapshot['calendar'][$day]['seats']->$code)));
+        $response['unavailable_seats'] = array_values(array_filter($codes, function ($code) use ($snapshot, $day) {
+            $seat = $snapshot['calendar'][$day]['seats']->$code ?? null;
+            return $seat && empty($seat['hold_mine']);
+        }));
     }
     echo json_encode($response, JSON_THROW_ON_ERROR);
 } catch (InvalidArgumentException $error) {
