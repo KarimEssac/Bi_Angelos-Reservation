@@ -210,10 +210,6 @@ $allReservations = $snapshot['reservations'];
                         <span>Blocked</span>
                     </div>
                     <div class="legend-item">
-                        <span class="legend-box vip"></span>
-                        <span>VIP (unavailable)</span>
-                    </div>
-                    <div class="legend-item">
                         <span class="legend-box selected"></span>
                         <span>Selected</span>
                     </div>

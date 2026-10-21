@@ -100,7 +100,6 @@ $publicView = true;
                 <div class="legend-item"><span class="legend-box selected"></span><span>Selected</span></div>
                 <div class="legend-item"><span class="legend-own-seats" aria-hidden="true"><span class="legend-box pending own-seat"></span><span class="legend-box reserved own-seat"></span></span><span>Your seats</span></div>
                 <div class="legend-item"><span class="legend-box blocked" style="background:#000"></span><span>Unavailable</span></div>
-                <div class="legend-item"><span class="legend-box vip"></span><span>VIP (unavailable)</span></div>
             </div>
         </div>
         <?php require __DIR__ . '/seat_maps.php'; ?>
@@ -162,7 +161,6 @@ $publicView = true;
                             <label for="phone_number">Phone number *</label>
                             <input type="tel" id="phone_number" name="customer_phone" maxlength="20" autocomplete="tel" required>
                         </div>
-                        <p class="booking-help">Your seats are on hold while this window is open. Closing it releases the hold. You can choose seats from both dates and both seating areas in one booking.</p>
                         <button type="button" class="submit-btn continue-btn" data-step-forward="2">Continue</button>
                     </section>
                     <section data-booking-step="2" hidden>
@@ -180,7 +178,11 @@ $publicView = true;
                             <p id="paymentCustomerSummary"></p>
                             <p>By confirming, you state that you paid the total above through Instapay and will send your payment screenshot on WhatsApp. Your seats will remain pending until an admin verifies the payment.</p>
                         </div>
-                        <?php require __DIR__ . '/payment_instructions.php'; ?>
+                        <p class="payment-confirmation-warning"><strong>Warning:</strong> Confirming payment without actually paying may prevent you from making another reservation attempt for this show.</p>
+                        <details class="payment-instructions-toggle">
+                            <summary>Want to see the Instapay payment instructions?</summary>
+                            <?php require __DIR__ . '/payment_instructions.php'; ?>
+                        </details>
                         <button type="submit" class="submit-btn">Confirm reservation</button>
                         <button type="button" class="booking-back" data-step-back="2">Previous step</button>
                     </section>

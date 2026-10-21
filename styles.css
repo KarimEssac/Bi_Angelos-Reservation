@@ -1545,6 +1545,10 @@
 .booking-back { display: block; width: 100%; padding: 12px; margin-top: 10px; border: 1px solid #c9dbe8; border-radius: 8px; background: white; color: #207FBD; font: inherit; font-weight: 600; cursor: pointer; }
 .booking-back:disabled, .continue-btn:disabled { opacity: 0.6; cursor: wait; }
 .booking-help, .payment-note { color: #5c7182; font-size: 13px; line-height: 1.6; margin-bottom: 12px; }
+.payment-confirmation-warning { margin: 12px 0 16px; padding: 12px 14px; border: 1px solid #ffca2c; border-radius: 8px; background: #fff3cd; color: #664d03; font-size: 14px; line-height: 1.6; }
+.payment-instructions-toggle { margin-bottom: 16px; }
+.payment-instructions-toggle summary { padding: 10px 0; color: #207FBD; font-size: 14px; font-weight: 600; line-height: 1.6; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.payment-instructions-toggle summary:focus-visible { outline: 3px solid #FC723E; outline-offset: 3px; }
 .payment-details, .confirmation-summary { padding: 16px; margin-bottom: 16px; border: 1px solid #dce7ef; border-radius: 10px; background: #f8fbfd; }
 .payment-details h3, .confirmation-summary h3 { color: #207FBD; font-size: 18px; margin-bottom: 12px; }
 .payment-details p, .confirmation-summary p { line-height: 1.7; margin-bottom: 10px; }
@@ -1601,8 +1605,6 @@
 
 /* Search stays outside the live-updated reservation results. */
 .reservation-search { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px 14px; padding: 18px; margin-bottom: 24px; border: 1px solid #dce7ef; border-radius: 12px; background: #f8fbfd; }
-.seat.vip, .legend-box.vip { background-color: #c026d3; border-color: #86198f; color: white; }
-.seat.vip { cursor: not-allowed; }
 .tab-content.reservation-data-view.active { display: flex; flex-direction: column; }
 .reservation-data-view #reservationDataPanel { display: contents; }
 .reservation-data-view [data-daily-overview] { order: -2; }

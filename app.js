@@ -103,18 +103,18 @@ function startTheatreApp(initial) {
                     showReservationConflict(result.unavailable_seats, true, result.hold_expired);
                     return false;
                 }
-                if (!response.ok || !result.ok) throw new Error(result.error || 'Could not hold your seats.');
+                if (!response.ok || !result.ok) throw new Error(result.error || 'Could not check seat availability.');
                 holdReady = true;
                 holdAcquired = true;
                 nextHoldRenewal = Date.now() + 15000;
-                status.textContent = 'Your seats are on hold while this window is open.';
-                status.hidden = false;
+                status.textContent = '';
+                status.hidden = true;
                 return true;
             } catch (_) {
                 if (key !== activeHoldKey) return false;
                 holdReady = false;
                 nextHoldRenewal = Date.now() + 3000;
-                status.textContent = 'Reconnecting to hold your seats. Please wait before continuing.';
+                status.textContent = 'Reconnecting. Please wait before continuing.';
                 status.hidden = false;
                 return false;
             } finally {
@@ -674,7 +674,7 @@ function startTheatreApp(initial) {
         holdAcquired = false;
         nextHoldRenewal = 0;
         const status = document.getElementById('seatHoldStatus');
-        status.textContent = 'Holding your seats...';
+        status.textContent = 'Checking seat availability...';
         status.hidden = false;
         setReservationButton(true);
         // Reset khedma state each time modal opens.
@@ -840,8 +840,8 @@ function startTheatreApp(initial) {
         const subject = codes.length === 1 ? 'Seat ' + labels[0] + ' is' : 'Seats ' + labels.join(', ') + ' are';
         const held = codes.some(key => occupiedSeat(key)?.on_hold);
         document.getElementById('reservationConflictMessage').textContent = holdExpired
-            ? 'Your temporary seat hold expired. Your selection has been cleared. Close this window and choose available seats from the updated map.'
-            : subject + ' no longer available. Another person ' + (held ? 'put these seats on hold' : 'reserved or requested these seats') +
+            ? 'Your reservation session expired. Your selection has been cleared. Close this window and choose available seats from the updated map.'
+            : subject + ' no longer available. Another person ' + (held ? 'is completing a reservation for these seats' : 'reserved or requested these seats') +
                 ' while this window was open. Your selection has been cleared. Close this window and choose available seats from the updated map.';
         selectedSeats = [];
         syncSeats();
@@ -852,7 +852,7 @@ function startTheatreApp(initial) {
     function syncSeats() {
         const selected = new Set(selectedSeats);
         for (const element of document.querySelectorAll('.seat[data-seat]')) {
-            if (element.classList.contains('blocked') || element.classList.contains('sound-control') || element.classList.contains('vip')) continue;
+            if (element.classList.contains('blocked') || element.classList.contains('sound-control')) continue;
             const code = element.dataset.seat;
             const key = initial.day + '|' + code;
             const booking = currentState.calendar[initial.day]?.seats[code];
