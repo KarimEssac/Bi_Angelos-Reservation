@@ -1489,6 +1489,39 @@
             }
         }
 
+@media (max-width: 767px), (orientation: portrait) {
+    body:has(#reservationModal.active) {
+        overflow: hidden;
+    }
+
+    #reservationModal {
+        height: 100vh;
+        height: 100dvh;
+        overflow: hidden;
+    }
+
+    #reservationModal.active {
+        align-items: stretch;
+        padding: 0;
+    }
+
+    #reservationModal > .modal-content {
+        width: 100%;
+        max-width: none;
+        height: 100%;
+        max-height: none;
+        margin: 0;
+        border-radius: 0;
+        padding: max(60px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+        overscroll-behavior-y: contain;
+    }
+
+    #reservationModal .close-modal {
+        top: max(12px, env(safe-area-inset-top));
+        right: max(12px, env(safe-area-inset-right));
+    }
+}
+
         .reservation-scope { text-align: center; color: #546778; margin-bottom: 18px; }
         .modal-location { color: #546778; margin-top: 8px; }
         .balcony-scroll-container { overflow-x: auto; }

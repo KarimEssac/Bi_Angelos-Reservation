@@ -1,5 +1,17 @@
 'use strict';
 
+async function readJsonResponse(response, message) {
+    const body = await response.text();
+    try {
+        return JSON.parse(body);
+    } catch (_) {
+        const title = body.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim() || '';
+        console.error('Expected JSON: ' + JSON.stringify({url: response.url, status: response.status,
+            contentType: response.headers.get('Content-Type'), title}));
+        throw new Error(message + ' The server returned an unexpected response (HTTP ' + response.status + ').');
+    }
+}
+
 function startTheatreApp(initial) {
     initial.area = initial.area || 'theatre';
     const publicBooking = initial.public === true;
@@ -53,7 +65,7 @@ function startTheatreApp(initial) {
     }
 
     function holdFields(key, action, codes = modalSeatCodes) {
-        const fields = new FormData();
+        const fields = new URLSearchParams();
         fields.set('csrf_token', reservationFormElement.elements.csrf_token.value);
         fields.set('request_key', reservationFormElement.elements.request_key.value);
         fields.set('hold_key', key);
@@ -92,7 +104,7 @@ function startTheatreApp(initial) {
                     method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
                     body: holdFields(key, holdAcquired ? 'renew' : 'acquire', codes),
                 });
-                const result = await response.json();
+                const result = await readJsonResponse(response, 'Could not check seat availability.');
                 if (key !== activeHoldKey) return false;
                 if (response.status === 401) {
                     stopped = true;
@@ -399,7 +411,7 @@ function startTheatreApp(initial) {
         setReservationButton(true, 'Loading payment details...');
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10000);
-        const fields = new FormData();
+        const fields = new URLSearchParams();
         fields.set('csrf_token', reservationFormElement.elements.csrf_token.value);
         fields.set('request_key', reservationFormElement.elements.request_key.value);
         paymentAssignmentRequest = (async () => {
@@ -407,7 +419,7 @@ function startTheatreApp(initial) {
                 method: 'POST', credentials: 'same-origin', cache: 'no-store',
                 headers: {'Accept': 'application/json'}, body: fields, signal: controller.signal,
             });
-            const result = await response.json();
+            const result = await readJsonResponse(response, 'Could not load payment details.');
             if (!response.ok) throw new Error(result.error || 'Could not load payment details.');
             if (!result.recipient || !result.assignment || !result.qr || !result.url || !result.whatsapp_url) {
                 throw new Error('Could not load payment details.');
@@ -953,7 +965,7 @@ function startTheatreApp(initial) {
                 throw new Error('Please sign in again.');
             }
             if (!response.ok) throw new Error('Could not refresh reservations.');
-            const snapshot = await response.json();
+            const snapshot = await readJsonResponse(response, 'Could not refresh availability.');
             if (requestedHoldKey !== activeHoldKey) {
                 return {changed: false, unavailable_seats: []};
             }
@@ -1007,14 +1019,14 @@ function startTheatreApp(initial) {
             destination.search = parameters.toString();
             const response = await fetch(destination, {
                 method: 'POST', credentials: 'same-origin', cache: 'no-store',
-                headers: {'Accept': 'application/json'}, body: new FormData(reservationFormElement),
+                headers: {'Accept': 'application/json'}, body: new URLSearchParams(new FormData(reservationFormElement)),
             });
             if (response.status === 401) {
                 stopped = true;
                 window.location.replace('login.php');
                 return;
             }
-            const result = await response.json();
+            const result = await readJsonResponse(response, 'Could not complete your reservation.');
             if (response.status === 409) {
                 showReservationConflict(result.unavailable_seats, true, result.hold_expired);
                 refreshState({force: true}).catch(() => {});
