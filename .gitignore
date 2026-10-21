@@ -1,2 +1,4 @@
 /output/
 /.playwright-cli/
+/db.php
+/db config.txt
