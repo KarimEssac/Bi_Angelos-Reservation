@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/login_rate_limit.php';
 if (currentAdmin($pdo)) {
     header('Location: admoonzz');
     exit;
@@ -9,13 +10,27 @@ $email = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = is_string($_POST['email'] ?? null) ? trim($_POST['email']) : '';
     $password = is_string($_POST['password'] ?? null) ? $_POST['password'] : '';
-    if ($email === '' || $password === '') {
-        $error = 'Enter your email address and password.';
-    } elseif (loginAdmin($pdo, $email, $password)) {
-        header('Location: admoonzz');
-        exit;
-    } else {
-        $error = 'Invalid email address or password.';
+    try {
+        $retryAfter = consumeLoginAttempt($pdo, $_SERVER['REMOTE_ADDR'] ?? 'unknown');
+    } catch (PDOException $exception) {
+        error_log('Login rate limit unavailable: ' . $exception->getMessage());
+        http_response_code(503);
+        header('Retry-After: 60');
+        $error = 'Login is temporarily unavailable. Please try again shortly.';
+    }
+    if ($error === '') {
+        if ($retryAfter > 0) {
+            http_response_code(429);
+            header('Retry-After: ' . $retryAfter);
+            $error = 'Too many login attempts. Please try again in ' . $retryAfter . ' seconds.';
+        } elseif ($email === '' || $password === '') {
+            $error = 'Enter your email address and password.';
+        } elseif (loginAdmin($pdo, $email, $password)) {
+            header('Location: admoonzz');
+            exit;
+        } else {
+            $error = 'Invalid email address or password.';
+        }
     }
 }
 ?>

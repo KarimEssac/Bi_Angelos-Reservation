@@ -82,7 +82,7 @@ $publicView = true;
                     <?php foreach (SEATING_AREAS as $area => $label): ?>
                         <a href="?day=<?php echo $selectedDay; ?>&amp;area=<?php echo $area; ?>" data-area="<?php echo $area; ?>"
                            class="<?php echo $selectedArea === $area ? 'active' : ''; ?>"
-                           <?php if ($selectedArea === $area): ?>aria-current="true"<?php endif; ?>><?php echo $label; ?></a>
+                           <?php if ($selectedArea === $area): ?>aria-current="true"<?php endif; ?>><?php echo $label; ?> (<?php echo TICKET_PRICES[$area]; ?> EGP / seat)</a>
                     <?php endforeach; ?>
                 </nav>
             </div>

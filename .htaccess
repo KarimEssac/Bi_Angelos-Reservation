@@ -3,5 +3,9 @@ Options -Indexes
 
 RewriteEngine On
 RewriteRule ^\.git(?:/|$) - [F,L]
+RewriteCond %{THE_REQUEST} \s/+[^\s?]*login(?:\.php|/)(?:[?\s]) [NC]
+RewriteCond %{REQUEST_URI} ^(.*/)login(?:\.php|/)$
+RewriteRule ^login(?:\.php|/)$ %1login [R=308,L]
+RewriteRule ^login$ login.php [L,QSA]
 RewriteRule ^admoonzz/$ admoonzz [R=301,L]
 RewriteRule ^admoonzz$ admin.php [L,QSA]
