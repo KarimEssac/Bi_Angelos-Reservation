@@ -3,9 +3,9 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/reservations.php';
 
 const INSTAPAY_RECIPIENTS = [
-    'maria' => ['qr' => 'maria.jpeg', 'whatsapp_url' => 'https://wa.me/201211571484',
+    'maria' => ['qr' => 'maria.jpeg', 'whatsapp_url' => 'https://wa.me/201211571484', 'phone' => '01211571484',
         'url' => 'https://ipn.eg/C/Q/marianabil2711/instapay?ISIGN=23052603MEUCIH0aqFMdPtnqwthntNY7aza0WIgt/0tko3YCtXrZmfu8AiEAu9V9Q8GtzC6wNRrskv0cuGP33Ka2omSNllUu35UPpA0='],
-    'monica' => ['qr' => 'monica.jpeg', 'whatsapp_url' => 'https://wa.me/201289921193',
+    'monica' => ['qr' => 'monica.jpeg', 'whatsapp_url' => 'https://wa.me/201289921193', 'phone' => '01289921193',
         'url' => 'https://ipn.eg/C/Q/monicanabil98/instapay?ISIGN=23052602MEYCIQCreltVhAlWTpgMbQ/TxX23oNwSDSLQcXXcAPMGfgy9zQIhAOq6c2j+LyipweCa0SiZD2wrTpIF9WOzMsZZpG0SWt27'],
 ];
 

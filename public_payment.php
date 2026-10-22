@@ -12,6 +12,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 try {
     $token = visitorToken(false);
     $requestKey = validatePaymentRequest($token, $_POST);
+    // Seed missing setup data without resetting an existing rotation.
+    $pdo->exec("INSERT INTO payment_rotation (id, next_recipient) VALUES (1, 'maria')
+        ON DUPLICATE KEY UPDATE id = VALUES(id)");
     $recipient = $pdo->query('SELECT next_recipient FROM payment_rotation WHERE id = 1')->fetchColumn();
     if (!isset(INSTAPAY_RECIPIENTS[$recipient])) throw new RuntimeException('Payment rotation has not been configured.');
     echo json_encode(['recipient' => $recipient, 'assignment' => paymentAssignmentSignature($token, $requestKey, $recipient)]

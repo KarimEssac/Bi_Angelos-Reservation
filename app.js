@@ -421,7 +421,7 @@ function startTheatreApp(initial) {
             });
             const result = await readJsonResponse(response, 'Could not load payment details.');
             if (!response.ok) throw new Error(result.error || 'Could not load payment details.');
-            if (!result.recipient || !result.assignment || !result.qr || !result.url || !result.whatsapp_url) {
+            if (!result.recipient || !result.assignment || !result.qr || !result.url || !result.whatsapp_url || !result.phone) {
                 throw new Error('Could not load payment details.');
             }
             paymentAssignment = result;
@@ -430,6 +430,8 @@ function startTheatreApp(initial) {
             for (const image of document.querySelectorAll('[data-payment-qr]')) image.src = result.qr;
             for (const link of document.querySelectorAll('[data-payment-qr-link]')) link.href = result.qr;
             for (const link of document.querySelectorAll('[data-payment-redirect]')) link.href = result.url;
+            for (const phone of document.querySelectorAll('[data-payment-phone]')) phone.textContent = result.phone;
+            for (const contact of document.querySelectorAll('[data-payment-contact]')) contact.hidden = false;
             for (const account of document.querySelectorAll('[data-payment-account]')) account.hidden = false;
             updatePaymentContactLinks();
             status.hidden = true;
@@ -481,6 +483,15 @@ function startTheatreApp(initial) {
     }
 
     if (publicBooking) {
+        const confirmation = document.getElementById('bookingConfirmation');
+        if (confirmation) {
+            document.getElementById('bookingConfirmationClose').addEventListener('click', () => confirmation.close());
+            confirmation.showModal();
+            const target = new URL(window.location.href);
+            target.searchParams.delete('requested');
+            target.searchParams.delete('request');
+            window.history.replaceState(null, '', target);
+        }
         document.getElementById('retryPaymentAssignment').addEventListener('click', () => loadPaymentAssignment().catch(() => {}));
         document.getElementById('phone_number').addEventListener('input', event => event.target.setCustomValidity(''));
         for (const button of document.querySelectorAll('[data-step-forward]')) {

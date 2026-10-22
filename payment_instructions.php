@@ -16,6 +16,7 @@ if (!defined('PUBLIC_BOOKING_PAGE')) {
         </div>
     </div>
     <p>Send a screenshot of your Instapay payment and the exact name used for this reservation using
-        <a class="payment-whatsapp" target="_blank" rel="noopener noreferrer">click here to go to whatsapp</a>.</p>
+        <a class="payment-whatsapp" target="_blank" rel="noopener noreferrer">click here to go to whatsapp</a>
+        <span data-payment-contact hidden>or contact <span data-payment-phone></span></span>.</p>
     <p class="payment-note">Your payment will be checked by an admin. Unapproved requests expire automatically after a short period.</p>
 </div>

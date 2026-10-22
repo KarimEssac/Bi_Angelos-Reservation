@@ -89,7 +89,7 @@ $publicView = true;
         </div>
         <p id="liveNotice" class="live-notice" role="status" hidden></p>
         <?php if (isset($_GET['requested'])): ?>
-            <div class="success-message" role="status">Your request was submitted. Follow your seats on the map for their latest status. <?php if ($receiptRecipient): ?>Send your payment screenshot and booking name using <a href="<?php echo $receiptRecipient['whatsapp_url']; ?>" target="_blank" rel="noopener noreferrer">click here to go to whatsapp</a>.<?php endif; ?> Requests stay pending until approved and expire after a short period if unapproved.</div>
+            <div class="success-message" role="status">Your request was submitted. Follow your seats on the map for their latest status. <?php if ($receiptRecipient): ?>Send your payment screenshot and booking name using <a href="<?php echo $receiptRecipient['whatsapp_url']; ?>" target="_blank" rel="noopener noreferrer">click here to go to whatsapp</a> or contact <?php echo $receiptRecipient['phone']; ?>.<?php endif; ?> Requests stay pending until approved and expire after a short period if unapproved.</div>
         <?php endif; ?>
         <div class="legend">
             <div class="legend-items">
@@ -197,6 +197,14 @@ $publicView = true;
         </div>
     </div>
     <script id="theatre-state" type="application/json"><?php echo json_encode(['public' => true, 'day' => $selectedDay, 'area' => $selectedArea, 'day_label' => PERFORMANCE_DATES[$selectedDay], 'days' => PERFORMANCE_DATES, 'prices' => TICKET_PRICES, 'live_url' => 'public_live.php', 'submit_url' => './', 'payment_url' => 'public_payment.php'] + $calendarSnapshot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR); ?></script>
+    <?php if ($receiptRecipient): ?>
+        <dialog id="bookingConfirmation" class="booking-confirmation" aria-labelledby="bookingConfirmationTitle" aria-describedby="bookingConfirmationMessage bookingTicketCollection">
+            <h2 id="bookingConfirmationTitle">Reservation submitted</h2>
+            <p id="bookingConfirmationMessage">An admin is verifying your payment. Please stay in contact with them at <strong><?php echo $receiptRecipient['phone']; ?></strong>.</p>
+            <p id="bookingTicketCollection">Collect your tickets at the door on the day of your show, or on any upcoming Friday before the show.</p>
+            <button type="button" id="bookingConfirmationClose" class="submit-btn" autofocus>Got it</button>
+        </dialog>
+    <?php endif; ?>
     <script src="app.js?v=<?php echo filemtime(__DIR__ . '/app.js'); ?>"></script>
 </body>
 </html>
