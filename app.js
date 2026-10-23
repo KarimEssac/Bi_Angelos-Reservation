@@ -188,10 +188,11 @@ function startTheatreApp(initial) {
         for (const field of document.querySelectorAll('input[name="day"]:not([data-fixed-day])')) field.value = initial.day;
         for (const field of document.querySelectorAll('input[name="area"]')) field.value = initial.area;
         for (const form of document.querySelectorAll('form[data-reservation-day]')) {
-            const target = new URL(form.action);
+            // The hidden input named "action" masks the form.action property.
+            const target = new URL(form.getAttribute('action') || window.location.href, document.baseURI);
             target.searchParams.set('day', form.dataset.reservationDay);
             target.searchParams.set('area', initial.area);
-            form.action = target.href;
+            form.setAttribute('action', target.href);
         }
     }
 
