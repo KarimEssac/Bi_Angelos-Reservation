@@ -26,7 +26,7 @@ try {
     if (!is_string($area) || !isset(SEATING_AREAS[$area])) {
         throw new InvalidArgumentException('Choose Main Theatre or Balcony.');
     }
-    $checkedSeats = isset($_GET['seats']) ? parseSeatCodes(is_string($_GET['seats']) ? $_GET['seats'] : '') : null;
+    $checkedSeats = isset($_GET['seats']) ? parseSeatCodes(is_string($_GET['seats']) ? $_GET['seats'] : '', $day) : null;
     expireReservations($pdo);
     $holdOwner = isset($_GET['hold_key']) ? adminSeatHoldOwner($_GET['hold_key']) : null;
     $snapshot = reservationCalendarSnapshot($pdo, $area, false, $holdOwner);

@@ -32,7 +32,7 @@ function parseSeatBasket(string $json): array
             || array_filter($codes, fn($code) => !is_string($code))) {
             throw new InvalidArgumentException('Choose valid seats and dates.');
         }
-        $basket[$day] = parseSeatCodes(implode(',', $codes));
+        $basket[$day] = parseSeatCodes(implode(',', $codes), $day);
     }
     ksort($basket);
     return $basket;
@@ -46,7 +46,7 @@ function inputSeatBasket(array $input): array
     }
     $day = $input['day'] ?? '';
     if (!is_string($day) || !isset(PERFORMANCE_DATES[$day])) throw new InvalidArgumentException('Choose a valid date.');
-    return [$day => parseSeatCodes(is_string($input['seat_codes'] ?? null) ? $input['seat_codes'] : '')];
+    return [$day => parseSeatCodes(is_string($input['seat_codes'] ?? null) ? $input['seat_codes'] : '', $day)];
 }
 
 function basketConflictKeys(PDO $pdo, array $basket, array $performances, ?string $holdOwner = null): array
@@ -179,10 +179,11 @@ function pendingBookingGroups(array $reservations): array
 function preventVipApproval(PDO $pdo, array $reservationIds): void
 {
     $placeholders = implode(',', array_fill(0, count($reservationIds), '?'));
-    $stmt = $pdo->prepare("SELECT seat_code FROM reservation_seats WHERE reservation_id IN ($placeholders)");
+    $stmt = $pdo->prepare("SELECT s.seat_code, p.performance_date FROM reservation_seats s
+        JOIN performances p ON p.id = s.performance_id WHERE s.reservation_id IN ($placeholders)");
     $stmt->execute($reservationIds);
-    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $code) {
-        if (isVipSeat($code)) throw new InvalidArgumentException('VIP seats cannot be approved. Reject the affected reservation and select available seats.');
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $seat) {
+        if (isVipSeat($seat['seat_code'], $seat['performance_date'])) throw new InvalidArgumentException('VIP seats cannot be approved. Reject the affected reservation and select available seats.');
     }
 }
 
@@ -285,8 +286,12 @@ function unavailableSeats(PDO $pdo, int $performanceId, array $codes, ?int $exce
     $stmt = $pdo->prepare($sql . ' ORDER BY seat_code');
     $stmt->execute($parameters);
     $unavailable = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    $performance = $pdo->prepare('SELECT performance_date FROM performances WHERE id = ?');
+    $performance->execute([$performanceId]);
+    $day = (string) $performance->fetchColumn();
     $holds = seatHoldSnapshot($pdo, $performanceId, $holdOwner);
     foreach ($codes as $code) {
+        if (isVipSeat($code, $day)) $unavailable[] = $code;
         if (isset($holds[$code]) && !$holds[$code]['hold_mine']) $unavailable[] = $code;
     }
     return array_values(array_unique($unavailable));

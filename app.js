@@ -875,6 +875,15 @@ function startTheatreApp(initial) {
     function syncSeats() {
         const selected = new Set(selectedSeats);
         for (const element of document.querySelectorAll('.seat[data-seat]')) {
+            if (element.hasAttribute('data-vip-days')) {
+                const vip = element.dataset.vipDays.split(',').includes(initial.day);
+                element.classList.toggle('sound-control', vip);
+                if (vip) {
+                    element.classList.remove('available', 'reserved', 'reserved-unpaid', 'pending', 'selected', 'on-hold', 'own-seat');
+                    element.title = 'VIP';
+                    element.onclick = null;
+                }
+            }
             if (element.classList.contains('blocked') || element.classList.contains('sound-control')) continue;
             const code = element.dataset.seat;
             const key = initial.day + '|' + code;

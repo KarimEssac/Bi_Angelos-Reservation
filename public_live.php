@@ -11,7 +11,7 @@ try {
         throw new InvalidArgumentException('Choose a valid date and seating area.');
     }
     $performance = performanceId($pdo, $day);
-    $codes = isset($_GET['seats']) ? parseSeatCodes(is_string($_GET['seats']) ? $_GET['seats'] : '') : null;
+    $codes = isset($_GET['seats']) ? parseSeatCodes(is_string($_GET['seats']) ? $_GET['seats'] : '', $day) : null;
     expireReservations($pdo);
     $holdKey = isset($_GET['hold_key']) ? validateSeatHoldKey($_GET['hold_key']) : null;
     $snapshot = publicCalendarSnapshot($pdo, $token, $holdKey);

@@ -4,12 +4,16 @@ if (!isset($snapshot, $selectedArea)) {
     exit;
 }
 $publicView = $publicView ?? false;
-$renderMapSeat = static function (string $code, int $number, bool $blocked = false, bool $soundControl = false) use ($snapshot, $publicView): void {
+$renderMapSeat = static function (string $code, int $number, bool $blocked = false, bool $soundControl = false) use ($snapshot, $publicView, $selectedDay): void {
     $booking = $snapshot['seats']->$code ?? null;
+    $vipDays = [];
+    foreach (PERFORMANCE_DATES as $day => $label) {
+        if (isVipSeat($code, $day)) $vipDays[] = $day;
+    }
     $class = 'available';
     $title = 'Available - Click to reserve';
     $onclick = 'toggleSeat(this)';
-    if (isVipSeat($code)) {
+    if (isVipSeat($code, $selectedDay)) {
         $class = 'sound-control';
         $title = 'VIP';
         $onclick = '';
@@ -33,6 +37,7 @@ $renderMapSeat = static function (string $code, int $number, bool $blocked = fal
     }
     ?>
     <div class="seat <?php echo $class; ?>" data-seat="<?php echo $code; ?>"
+         <?php if ($vipDays): ?>data-vip-days="<?php echo implode(',', $vipDays); ?>"<?php endif; ?>
          title="<?php echo htmlspecialchars($title, ENT_QUOTES, 'UTF-8'); ?>"
          onclick="<?php echo htmlspecialchars($onclick, ENT_QUOTES, 'UTF-8'); ?>"><?php echo $number; ?></div>
     <?php
