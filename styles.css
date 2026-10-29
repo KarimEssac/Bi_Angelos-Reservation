@@ -533,14 +533,15 @@
 
         .collector-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
             gap: 15px;
         }
 
         .collector-row {
-            display: flex;
+            display: grid;
+            grid-template-columns: 44px minmax(0, 1fr);
             align-items: center;
-            gap: 14px;
+            gap: 4px 14px;
             background: linear-gradient(135deg, #f0f8ff 0%, #e6f3fb 100%);
             border: 2px solid #A1CAE3;
             border-radius: 14px;
@@ -555,6 +556,7 @@
         }
 
         .collector-avatar {
+            grid-row: span 2;
             width: 44px;
             height: 44px;
             border-radius: 50%;
@@ -578,9 +580,7 @@
             font-weight: 700;
             color: #207FBD;
             font-size: 15px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            overflow-wrap: anywhere;
         }
 
         .collector-seats {
@@ -590,10 +590,11 @@
         }
 
         .collector-total {
+            grid-column: 2;
             font-weight: 800;
             font-size: 15px;
             color: #FC723E;
-            white-space: nowrap;
+            overflow-wrap: anywhere;
         }
         
         .legend {

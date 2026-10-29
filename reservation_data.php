@@ -63,7 +63,7 @@ if (!isset($allReservations, $approvedReservations, $pendingReservations, $reser
             ?>
             <div class="collector-card">
                 <div class="collector-card-title">
-                    &#128100; Collected by Controller
+                    &#128100; Collected
                 </div>
                 <div class="collector-grid">
                     <?php foreach ($controllerTotals as $name => $data): ?>
