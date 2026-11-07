@@ -65,7 +65,7 @@ function reserveSeatBasket(PDO $pdo, array $basket, array $data, ?int $adminId =
     $prices = [];
     foreach ($basket as $day => $codes) {
         $performances[$day] = performanceId($pdo, $day);
-        $prices[$day] = reservationTicketTotal(['seat_codes' => implode(',', $codes),
+        $prices[$day] = reservationTicketTotal(['seat_codes' => implode(',', $codes), 'performance_date' => $day,
             'has_service_discount' => $data['has_service_discount']]);
     }
     asort($performances, SORT_NUMERIC);

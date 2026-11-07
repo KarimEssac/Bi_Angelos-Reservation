@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/reservations.php';
+require_once __DIR__ . '/public_booking_notice.php';
 
 const INSTAPAY_RECIPIENTS = [
     'maria' => ['qr' => 'maria.jpeg', 'whatsapp_url' => 'https://wa.me/201211571484', 'phone' => '01211571484',
@@ -8,6 +9,19 @@ const INSTAPAY_RECIPIENTS = [
     'monica' => ['qr' => 'monica.jpeg', 'whatsapp_url' => 'https://wa.me/201289921193', 'phone' => '01289921193',
         'url' => 'https://ipn.eg/C/Q/monicanabil98/instapay?ISIGN=23052602MEYCIQCreltVhAlWTpgMbQ/TxX23oNwSDSLQcXXcAPMGfgy9zQIhAOq6c2j+LyipweCa0SiZD2wrTpIF9WOzMsZZpG0SWt27'],
 ];
+
+function validatePublicSeatBasket(array $basket): void
+{
+    foreach ($basket as $day => $codes) {
+        foreach ($codes as $code) {
+            $area = str_starts_with($code, 'B-') ? 'balcony' : 'theatre';
+            if (publicBookingContactOnly($day, $area)) {
+                throw new InvalidArgumentException('Tickets almost sold out! Contact admins to reserve your spots: '
+                    . implode(' / ', array_column(INSTAPAY_RECIPIENTS, 'phone')) . '.');
+            }
+        }
+    }
+}
 
 function visitorToken(bool $create = true): string
 {
@@ -81,6 +95,8 @@ function publicBookingSnapshot(PDO $pdo, int $performanceId, string $browserToke
 function submitPublicBooking(PDO $pdo, string $browserToken, array $input): void
 {
     $requestKey = validatePaymentRequest($browserToken, $input);
+    $basket = inputSeatBasket($input);
+    validatePublicSeatBasket($basket);
     if (($input['payment_acknowledged'] ?? '') !== '1') {
         throw new InvalidArgumentException('Complete the payment steps before confirming your request.');
     }
@@ -91,7 +107,6 @@ function submitPublicBooking(PDO $pdo, string $browserToken, array $input): void
         throw new InvalidArgumentException('Reopen the booking page to load your payment account before confirming.');
     }
     // Public callers cannot set approval, collector, balance, ticket, or discount fields.
-    $basket = inputSeatBasket($input);
     $data = reservationInput([
         'customer_name' => $input['customer_name'] ?? '', 'customer_phone' => $input['customer_phone'] ?? '',
         'seat_codes' => implode(',', reset($basket)), 'is_paid' => '1',

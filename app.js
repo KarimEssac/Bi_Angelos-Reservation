@@ -151,6 +151,10 @@ function startTheatreApp(initial) {
         return keys.map(seatLabel).join('; ');
     }
 
+    function ticketPricesForDay(day = initial.day) {
+        return {...initial.prices, ...initial.price_overrides?.[day]};
+    }
+
     function syncNavigation() {
         for (const link of document.querySelectorAll('.day-selector:not(.area-selector) a')) {
             const target = new URL(link.href);
@@ -175,6 +179,9 @@ function startTheatreApp(initial) {
             target.searchParams.set('day', initial.day);
             link.href = target.href;
             const active = link.dataset.area === initial.area;
+            const area = link.dataset.area;
+            const label = area === 'theatre' ? 'Main Theatre' : 'Balcony';
+            link.textContent = label + ' (' + ticketPricesForDay()[area] + ' EGP / seat)';
             link.classList.toggle('active', active);
             if (active) link.setAttribute('aria-current', 'true');
             else link.removeAttribute('aria-current');
@@ -533,11 +540,12 @@ function startTheatreApp(initial) {
             const seats = basket[day];
             const theatreCount = seats.filter(code => !code.startsWith('B-')).length;
             const balconyCount = seats.length - theatreCount;
-            const theatrePrice = initial.prices[isKhedma ? 'khedma' : 'theatre'];
+            const prices = ticketPricesForDay(day);
+            const theatrePrice = prices[isKhedma ? 'khedma' : 'theatre'];
             if (days.length > 1) parts.push(initial.days[day]);
             if (theatreCount) parts.push((isKhedma ? 'Khedma Theatre' : 'Main Theatre') + ': ' + theatreCount + ' x ' + theatrePrice + ' EGP');
-            if (balconyCount) parts.push('Balcony: ' + balconyCount + ' x ' + initial.prices.balcony + ' EGP');
-            total += theatreCount * theatrePrice + balconyCount * initial.prices.balcony;
+            if (balconyCount) parts.push('Balcony: ' + balconyCount + ' x ' + prices.balcony + ' EGP');
+            total += theatreCount * theatrePrice + balconyCount * prices.balcony;
         }
         return {total, parts};
     }
@@ -551,10 +559,24 @@ function startTheatreApp(initial) {
         infoBox.appendChild(amount);
     }
 
+    function contactOnlyView(day = initial.day, area = initial.area) {
+        const notice = initial.contact_only;
+        return publicBooking && notice?.enabled === true && notice.day === day && notice.area === area;
+    }
+
+    function syncPublicBookingNotice() {
+        if (!publicBooking) return;
+        const contactOnly = contactOnlyView();
+        document.getElementById('publicBookingNotice').hidden = !contactOnly;
+        document.getElementById('publicSeatMaps').hidden = contactOnly;
+        document.getElementById('reservationAction').hidden = contactOnly;
+    }
+
     function switchSeatingArea(area, updateHistory = true) {
         if (!['theatre', 'balcony'].includes(area)) return;
         initial.area = area;
         for (const map of document.querySelectorAll('[data-map-area]')) map.hidden = map.dataset.mapArea !== area;
+        syncPublicBookingNotice();
         syncNavigation();
         if (updateHistory) updateViewHistory();
     }
@@ -630,6 +652,7 @@ function startTheatreApp(initial) {
     }
 
     function toggleSeat(element) {
+        if (contactOnlyView(initial.day, element.dataset.seat.startsWith('B-') ? 'balcony' : 'theatre')) return;
         if (!element.classList.contains('available')) return;
         const seatId = initial.day + '|' + element.getAttribute('data-seat');
         
@@ -645,6 +668,7 @@ function startTheatreApp(initial) {
     }
 
     function updateReservationButton() {
+        syncPublicBookingNotice();
         const actionButton = document.getElementById('reservationAction');
         const countElement = document.getElementById('selectedCount');
         

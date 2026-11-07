@@ -2,6 +2,12 @@
 const PERFORMANCE_DATES = ['2026-11-06' => 'Friday 6/11', '2026-11-07' => 'Saturday 7/11'];
 const SEATING_AREAS = ['theatre' => 'Main Theatre', 'balcony' => 'Balcony'];
 const TICKET_PRICES = ['theatre' => 120, 'khedma' => 100, 'balcony' => 75];
+const TICKET_PRICE_OVERRIDES = ['2026-11-07' => ['theatre' => 100]];
+
+function ticketPricesForDay(string $day): array
+{
+    return (TICKET_PRICE_OVERRIDES[$day] ?? []) + TICKET_PRICES;
+}
 
 function theatreSides(): array
 {
@@ -94,25 +100,26 @@ function isSeatPending($seat, $pendingSeats): bool
     return in_array($seat, $pendingSeats, true);
 }
 
-function seatTicketPrice(string $seatCode, bool $hasServiceDiscount): int
+function seatTicketPrice(string $seatCode, bool $hasServiceDiscount, string $day = ''): int
 {
-    return str_starts_with(trim($seatCode), 'B-') ? TICKET_PRICES['balcony']
-        : TICKET_PRICES[$hasServiceDiscount ? 'khedma' : 'theatre'];
+    $prices = ticketPricesForDay($day);
+    return str_starts_with(trim($seatCode), 'B-') ? $prices['balcony']
+        : $prices[$hasServiceDiscount ? 'khedma' : 'theatre'];
 }
 
 function reservationTicketTotal(array $reservation): int
 {
     $total = 0;
     foreach (explode(',', $reservation['seat_codes']) as $code) {
-        $total += seatTicketPrice($code, !empty($reservation['has_service_discount']));
+        $total += seatTicketPrice($code, !empty($reservation['has_service_discount']), $reservation['performance_date'] ?? '');
     }
     return $total;
 }
 
-function calculateTotalCollected(array $reservations): array
+function calculateTotalCollected(array $reservations, string $day = ''): array
 {
     $totals = ['total_revenue' => 0, 'breakdown' => []];
-    foreach (TICKET_PRICES as $type => $price) {
+    foreach (ticketPricesForDay($day) as $type => $price) {
         $totals['breakdown'][$type] = ['price' => $price, 'count' => 0, 'revenue' => 0];
     }
     foreach ($reservations as $reservation) {
@@ -122,7 +129,7 @@ function calculateTotalCollected(array $reservations): array
         foreach (explode(',', $reservation['seat_codes']) as $code) {
             $type = str_starts_with(trim($code), 'B-') ? 'balcony'
                 : (!empty($reservation['has_service_discount']) ? 'khedma' : 'theatre');
-            $price = seatTicketPrice($code, !empty($reservation['has_service_discount']));
+            $price = seatTicketPrice($code, !empty($reservation['has_service_discount']), $reservation['performance_date'] ?? $day);
             $totals['breakdown'][$type]['count']++;
             $totals['breakdown'][$type]['revenue'] += $price;
             $totals['total_revenue'] += $price;

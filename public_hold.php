@@ -18,6 +18,7 @@ try {
         throw new InvalidArgumentException('Choose a valid hold action.');
     }
     $basket = $action === 'release' ? [] : inputSeatBasket($_POST);
+    validatePublicSeatBasket($basket);
     changeSeatHold($pdo, seatHoldOwner($token, $holdKey), $action, $basket);
     echo json_encode(['ok' => true, 'expires_in' => SEAT_HOLD_SECONDS]);
 } catch (SeatConflictException $error) {

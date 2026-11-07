@@ -44,6 +44,7 @@ try {
     exit;
 }
 $publicView = true;
+$contactOnly = publicBookingContactOnly($selectedDay, $selectedArea);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -82,7 +83,7 @@ $publicView = true;
                     <?php foreach (SEATING_AREAS as $area => $label): ?>
                         <a href="?day=<?php echo $selectedDay; ?>&amp;area=<?php echo $area; ?>" data-area="<?php echo $area; ?>"
                            class="<?php echo $selectedArea === $area ? 'active' : ''; ?>"
-                           <?php if ($selectedArea === $area): ?>aria-current="true"<?php endif; ?>><?php echo $label; ?> (<?php echo TICKET_PRICES[$area]; ?> EGP / seat)</a>
+                           <?php if ($selectedArea === $area): ?>aria-current="true"<?php endif; ?>><?php echo $label; ?> (<?php echo ticketPricesForDay($selectedDay)[$area]; ?> EGP / seat)</a>
                     <?php endforeach; ?>
                 </nav>
             </div>
@@ -91,6 +92,16 @@ $publicView = true;
         <?php if (isset($_GET['requested'])): ?>
             <div class="success-message" role="status">Your request was submitted. Follow your seats on the map for their latest status. <?php if ($receiptRecipient): ?>Send your payment screenshot and booking name using <a href="<?php echo $receiptRecipient['whatsapp_url']; ?>" target="_blank" rel="noopener noreferrer">click here to go to whatsapp</a> or contact <?php echo $receiptRecipient['phone']; ?>.<?php endif; ?> Requests stay pending until approved and expire after a short period if unapproved.</div>
         <?php endif; ?>
+        <section id="publicBookingNotice" class="live-notice availability-notice" role="status" <?php if (!$contactOnly): ?>hidden<?php endif; ?>>
+            <h2>Tickets almost sold out!</h2>
+            <p>Contact admins to reserve your spots:<br>
+                <?php foreach (array_values(INSTAPAY_RECIPIENTS) as $index => $contact): ?>
+                    <?php if ($index > 0): ?> / <?php endif; ?>
+                    <a href="<?php echo htmlspecialchars($contact['whatsapp_url'], ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer"><?php echo htmlspecialchars($contact['phone'], ENT_QUOTES, 'UTF-8'); ?></a>
+                <?php endforeach; ?>
+            </p>
+        </section>
+        <div id="publicSeatMaps" <?php if ($contactOnly): ?>hidden<?php endif; ?>>
         <div class="legend">
             <div class="legend-items">
                 <div class="legend-item"><span class="legend-box available"></span><span>Available</span></div>
@@ -103,7 +114,8 @@ $publicView = true;
             </div>
         </div>
         <?php require __DIR__ . '/seat_maps.php'; ?>
-        <div class="reservation-action" id="reservationAction">
+        </div>
+        <div class="reservation-action" id="reservationAction" <?php if ($contactOnly): ?>hidden<?php endif; ?>>
             <button class="reserve-btn" onclick="openReservationModal()">Reserve Seats <span class="selected-count" id="selectedCount">0</span></button>
         </div>
     </main>
@@ -196,7 +208,7 @@ $publicView = true;
             </div>
         </div>
     </div>
-    <script id="theatre-state" type="application/json"><?php echo json_encode(['public' => true, 'day' => $selectedDay, 'area' => $selectedArea, 'day_label' => PERFORMANCE_DATES[$selectedDay], 'days' => PERFORMANCE_DATES, 'prices' => TICKET_PRICES, 'live_url' => 'public_live.php', 'submit_url' => './', 'payment_url' => 'public_payment.php'] + $calendarSnapshot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR); ?></script>
+    <script id="theatre-state" type="application/json"><?php echo json_encode(['public' => true, 'day' => $selectedDay, 'area' => $selectedArea, 'day_label' => PERFORMANCE_DATES[$selectedDay], 'days' => PERFORMANCE_DATES, 'prices' => TICKET_PRICES, 'price_overrides' => TICKET_PRICE_OVERRIDES, 'contact_only' => PUBLIC_BOOKING_CONTACT_ONLY, 'live_url' => 'public_live.php', 'submit_url' => './', 'payment_url' => 'public_payment.php'] + $calendarSnapshot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR); ?></script>
     <?php if ($receiptRecipient): ?>
         <dialog id="bookingConfirmation" class="booking-confirmation" aria-labelledby="bookingConfirmationTitle" aria-describedby="bookingConfirmationMessage bookingTicketCollection">
             <h2 id="bookingConfirmationTitle">Reservation submitted</h2>

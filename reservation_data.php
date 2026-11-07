@@ -9,7 +9,7 @@ if (!isset($allReservations, $approvedReservations, $pendingReservations, $reser
             $totalReservations = count($approvedReservations);
             $totalSeatsReserved = count($reservedSeats);
             $totalRemaining = array_sum(array_column($approvedReservations, 'remaining_amount'));
-            $collectedData = calculateTotalCollected($approvedReservations);
+            $collectedData = calculateTotalCollected($approvedReservations, $selectedDay);
             $searchableApprovedReservations = array_filter($calendarReservations ?: $allReservations,
                 fn($row) => $row['approval_status'] === 'approved');
             ?>

@@ -128,7 +128,7 @@ $allReservations = $snapshot['reservations'];
                 <a href="?day=<?php echo $selectedDay; ?>&amp;area=<?php echo $area; ?>&amp;tab=<?php echo $selectedTab; ?>"
                    data-area="<?php echo $area; ?>"
                    class="<?php echo $selectedArea === $area ? 'active' : ''; ?>"
-                   <?php if ($selectedArea === $area): ?>aria-current="true"<?php endif; ?>><?php echo $label; ?> (<?php echo TICKET_PRICES[$area]; ?> EGP / seat)</a>
+                   <?php if ($selectedArea === $area): ?>aria-current="true"<?php endif; ?>><?php echo $label; ?> (<?php echo ticketPricesForDay($selectedDay)[$area]; ?> EGP / seat)</a>
             <?php endforeach; ?>
         </nav>
             </div>
@@ -397,7 +397,7 @@ $allReservations = $snapshot['reservations'];
     </form>
 
 
-    <script id="theatre-state" type="application/json"><?php echo json_encode(['day' => $selectedDay, 'area' => $selectedArea, 'day_label' => PERFORMANCE_DATES[$selectedDay], 'days' => PERFORMANCE_DATES, 'prices' => TICKET_PRICES] + $calendarSnapshot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR); ?></script>
+    <script id="theatre-state" type="application/json"><?php echo json_encode(['day' => $selectedDay, 'area' => $selectedArea, 'day_label' => PERFORMANCE_DATES[$selectedDay], 'days' => PERFORMANCE_DATES, 'prices' => TICKET_PRICES, 'price_overrides' => TICKET_PRICE_OVERRIDES] + $calendarSnapshot, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR); ?></script>
     <script src="app.js?v=<?php echo filemtime(__DIR__ . '/app.js'); ?>"></script>
 </body>
 </html>
